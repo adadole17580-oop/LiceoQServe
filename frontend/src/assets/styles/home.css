@@ -1,0 +1,153 @@
+
+.greeting {
+  min-height: 191px;
+  padding: 34px;
+  background: #59080d;
+  color: white;
+  border-radius: 30px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.greeting p {
+  margin: 0;
+  font-size: 16px;
+}
+
+.greeting h2 {
+  font: 34px Georgia, serif;
+  margin: 16px 0;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+  margin-top: 55px;
+}
+
+.summary article {
+  min-height: 120px;
+  border: 1px solid #300c0e;
+  border-radius: 30px;
+  padding: 16px 19px;
+  background: #f8eeee;
+}
+
+.summary article p {
+  font-size: 14px;
+  margin: 0;
+}
+
+.summary h2 {
+  font: 34px Georgia, serif;
+  margin: 9px 0 4px;
+}
+
+.summary span {
+  font-size: 13px;
+}
+
+.appointments {
+  margin-top: 55px;
+}
+
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.section-heading h2 {
+  font: 32px Georgia, serif;
+  margin: 0;
+}
+
+.section-heading button {
+  background: transparent;
+  border: 0;
+  color: #59080d;
+  cursor: pointer;
+}
+
+.appointment-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 28px;
+}
+
+.appointment {
+  padding: 12px 22px;
+  border: 1px solid #300c0e;
+  border-radius: 25px;
+  background: #f8eeee;
+}
+
+.appointment-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.status {
+  padding: 5px 22px;
+  border-radius: 20px;
+  font-size: 12px;
+}
+
+.confirmed {
+  background: #b6dfc3;
+  color: #34583c;
+}
+
+.pending {
+  background: #eadc77;
+  color: #655a1e;
+}
+
+.appointment h3 {
+  font: 25px Georgia, serif;
+  margin: 6px 0;
+}
+
+.appointment p {
+  font-size: 14px;
+  margin: 10px 0 2px;
+}
+
+@media (max-width: 1000px) {
+  .summary {
+    gap: 10px;
+  }
+
+  .summary article {
+    padding: 14px;
+  }
+
+  .appointment-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 650px) {
+  .summary {
+    grid-template-columns: 1fr;
+    margin-top: 22px;
+  }
+
+  .appointments {
+    margin-top: 28px;
+  }
+
+  .section-heading h2 {
+    font-size: 25px;
+  }
+
+  .greeting h2 {
+    font-size: 26px;
+  }
+}
