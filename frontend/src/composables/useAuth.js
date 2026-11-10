@@ -4,6 +4,40 @@ import { supabase } from '../lib/supabase.js'
 const currentUser = ref(null)
 const currentProfile = ref(null)
 const authInitialized = ref(false)
+let profileChannel = null
+let profileSubscriptionUserId = null
+
+function subscribeToProfile(userId) {
+  if (profileSubscriptionUserId === userId) return
+  if (profileChannel) {
+    void supabase.removeChannel(profileChannel)
+    profileChannel = null
+  }
+  profileSubscriptionUserId = userId
+  profileChannel = supabase
+    .channel(`profile-${userId}`)
+    .on('postgres_changes', {
+      event: '*',
+      schema: 'public',
+      table: 'profiles',
+      filter: `id=eq.${userId}`,
+    }, (payload) => {
+      currentProfile.value = payload.eventType === 'DELETE' ? null : payload.new
+    })
+    .subscribe((status) => {
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        console.warn('Profile updates will refresh the next time profile data is loaded.')
+      }
+    })
+}
+
+function clearProfileSubscription() {
+  profileSubscriptionUserId = null
+  if (profileChannel) {
+    void supabase.removeChannel(profileChannel)
+    profileChannel = null
+  }
+}
 
 export function useAuth() {
   const isAuthenticated = computed(() => !!currentUser.value)
@@ -20,14 +54,17 @@ export function useAuth() {
 
       if (session?.user) {
         await fetchProfile(session.user.id)
+        subscribeToProfile(session.user.id)
       }
 
       supabase.auth.onAuthStateChange(async (_event, session) => {
         currentUser.value = session?.user || null
         if (session?.user) {
           await fetchProfile(session.user.id)
+          subscribeToProfile(session.user.id)
         } else {
           currentProfile.value = null
+          clearProfileSubscription()
         }
       })
     } catch (err) {
@@ -45,9 +82,8 @@ export function useAuth() {
         .eq('id', userId)
         .maybeSingle()
 
-      if (!error && data) {
-        currentProfile.value = data
-      }
+      if (error) throw error
+      currentProfile.value = data || null
     } catch (err) {
       console.warn('Could not fetch user profile:', err)
     }
@@ -64,6 +100,7 @@ export function useAuth() {
     currentUser.value = data.user
     if (data.user) {
       await fetchProfile(data.user.id)
+      subscribeToProfile(data.user.id)
     }
     return data
   }
@@ -97,6 +134,7 @@ export function useAuth() {
     await supabase.auth.signOut()
     currentUser.value = null
     currentProfile.value = null
+    clearProfileSubscription()
   }
 
   return {

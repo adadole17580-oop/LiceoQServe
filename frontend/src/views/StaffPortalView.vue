@@ -19,6 +19,7 @@ const appointmentsList = ref([])
 const roomReservations = ref([])
 const bookLoans = ref([])
 const nowServingTicket = ref(null)
+const requestInstructions = ref({})
 
 const notice = ref('')
 const errorMessage = ref('')
@@ -29,6 +30,13 @@ const selectedBorrowRequest = ref(null)
 const loanDueDate = ref(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10))
 let queueRefreshTimer = null
 let queueRefreshInProgress = false
+
+function toLocalDateTimeInput(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const pad = (number) => String(number).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
 
 function normalizeRequestStatus(status) {
   const normalized = String(status || '').trim().toLowerCase().replace(/[\s-]+/g, '_')
@@ -49,6 +57,8 @@ async function loadStaffData() {
   loading.value = true
   notice.value = ''
   errorMessage.value = ''
+  requestsList.value = []
+  appointmentsList.value = []
 
   try {
     const { data: { session } } = await supabase.auth.getSession()
@@ -71,23 +81,33 @@ async function loadStaffData() {
       nowServingTicket.value = null
     }
 
-    if (['Registrar', 'Library', 'Office of Student Affairs'].includes(selectedOffice.value)) {
+    if (['Registrar', 'Library', 'Guidance', 'Office of Student Affairs'].includes(selectedOffice.value)) {
       const rRes = await fetch(`${apiUrl}/api/staff/requests-list`, { headers })
-      if (rRes.ok) {
-        const rData = await rRes.json()
-        requestsList.value = (rData.requests || []).map((request) => ({
+      const rData = await rRes.json()
+      if (!rRes.ok) throw new Error(rData.error || 'Could not load service requests.')
+      requestsList.value = (rData.requests || [])
+        .filter((request) => request.office_services?.offices?.name === selectedOffice.value)
+        .map((request) => ({
           ...request,
           status: normalizeRequestStatus(request.status),
         }))
-      }
+    } else {
+      requestsList.value = []
     }
 
     if (['Registrar', 'Guidance', 'Office of Student Affairs', 'Library'].includes(selectedOffice.value)) {
       const aRes = await fetch(`${apiUrl}/api/staff/appointments-list`, { headers })
-      if (aRes.ok) {
-        const aData = await aRes.json()
-        appointmentsList.value = aData.appointments || []
-      }
+      const aData = await aRes.json()
+      if (!aRes.ok) throw new Error(aData.error || 'Could not load appointments.')
+      appointmentsList.value = (aData.appointments || [])
+        .filter((appointment) => appointment.office_services?.offices?.name === selectedOffice.value)
+        .map((appointment) => ({
+          ...appointment,
+          scheduleInput: toLocalDateTimeInput(appointment.scheduled_at),
+          studentMessage: '',
+        }))
+    } else {
+      appointmentsList.value = []
     }
 
     if (selectedOffice.value === 'Library') {
@@ -227,34 +247,73 @@ async function updateRequestStatus(requestId, status) {
     })
 
     const data = await res.json()
-    if (res.ok) {
-      notice.value = data.message
-      await loadStaffData()
-    }
+    if (!res.ok) throw new Error(data.error || 'Could not update request status.')
+    notice.value = data.message
+    await loadStaffData()
   } catch (err) {
     console.error('Error updating request status:', err)
+    errorMessage.value = err.message || 'Could not update request status.'
   }
 }
 
-async function updateAppointmentStatus(appointmentId, status) {
+async function sendRequestInstruction(request) {
+  const instruction = requestInstructions.value[request.id]?.trim()
+  if (!instruction) {
+    errorMessage.value = 'Enter an instruction before sending it to the student.'
+    return
+  }
+
   try {
     const { data: { session } } = await supabase.auth.getSession()
+    const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/requests/instruction`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session?.access_token}`,
+      },
+      body: JSON.stringify({ requestId: request.id, instruction }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'Could not send this instruction.')
+    notice.value = data.message
+    requestInstructions.value[request.id] = ''
+    await loadStaffData()
+  } catch (err) {
+    console.error('Error sending request instruction:', err)
+    errorMessage.value = err.message || 'Could not send this instruction.'
+  }
+}
+
+async function updateAppointmentStatus(appointmentId, status, scheduleInput, message) {
+  try {
+    const { data: { session } } = await supabase.auth.getSession()
+    const scheduledAt = scheduleInput ? new Date(scheduleInput) : null
+    if (scheduleInput && (!scheduledAt || Number.isNaN(scheduledAt.getTime()) || scheduledAt <= new Date())) {
+      errorMessage.value = 'Choose a valid appointment date and time in the future.'
+      return
+    }
+
     const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/appointments/update-status`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${session?.access_token}`,
       },
-      body: JSON.stringify({ appointmentId, status }),
+      body: JSON.stringify({
+        appointmentId,
+        status,
+        ...(scheduledAt ? { scheduledAt: scheduledAt.toISOString() } : {}),
+        ...(message?.trim() ? { message: message.trim() } : {}),
+      }),
     })
 
     const data = await res.json()
-    if (res.ok) {
-      notice.value = data.message
-      await loadStaffData()
-    }
+    if (!res.ok) throw new Error(data.error || 'Could not update appointment.')
+    notice.value = data.message
+    await loadStaffData()
   } catch (err) {
     console.error('Error updating appointment:', err)
+    errorMessage.value = err.message || 'Could not update appointment.'
   }
 }
 
@@ -537,6 +596,22 @@ onUnmounted(() => {
                 </div>
                 <p style="margin: 4px 0; font-size: 12px; color: #693e40;">{{ req.details }}</p>
                 <p style="margin: 4px 0 10px; font-size: 12px; color: #967f7f;">Requested by: {{ req.profiles?.full_name || 'Student' }}</p>
+                <label style="display: block; margin: 8px 0; font-size: 12px; color: #693e40;">
+                  Student instruction or response
+                  <textarea
+                    v-model="requestInstructions[req.id]"
+                    rows="2"
+                    maxlength="2000"
+                    style="display: block; width: 100%; margin-top: 4px; padding: 7px; border: 1px solid #d5c4c4; border-radius: 5px;"
+                  />
+                </label>
+                <button
+                  type="button"
+                  style="margin: 0 0 8px; background: #59080d; color: #fff; border: none; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 12px;"
+                  @click="sendRequestInstruction(req)"
+                >
+                  Send Student Update
+                </button>
                 <button
                   v-if="['pending', 'processing'].includes(req.status)"
                   type="button"
@@ -577,7 +652,73 @@ onUnmounted(() => {
         </div>
       </section>
 
-      <section v-if="['Registrar', 'Office of Student Affairs'].includes(selectedOffice)" style="background: #fff; border-radius: 12px; padding: 24px; border: 1px solid #d5c4c4; margin-bottom: 24px;">
+      <section
+        v-if="['Registrar', 'Guidance', 'Office of Student Affairs', 'Library'].includes(selectedOffice)"
+        style="background: #fff; border-radius: 12px; padding: 24px; border: 1px solid #d5c4c4; margin-bottom: 24px;"
+      >
+        <h2 style="margin: 0 0 16px; color: #59080d;">{{ selectedOffice }} Appointments</h2>
+        <div v-if="appointmentsList.length === 0" style="padding: 20px; color: #7a5052;">No appointments found.</div>
+        <div v-else style="display: flex; flex-direction: column; gap: 12px;">
+          <article
+            v-for="appointment in appointmentsList"
+            :key="appointment.id"
+            style="padding: 16px; background: #faf4f4; border-radius: 8px; border: 1px solid #ebdada;"
+          >
+            <div style="display: flex; justify-content: space-between; gap: 16px; align-items: flex-start;">
+              <div>
+                <strong style="color: #59080d;">{{ appointment.office_services?.name || 'Appointment' }}</strong>
+                <p style="margin: 4px 0; font-size: 13px; color: #693e40;">
+                  {{ appointment.profiles?.full_name || 'Student' }} ({{ appointment.profiles?.student_id || 'ID' }})
+                </p>
+                <p style="margin: 4px 0; font-size: 13px; color: #693e40;">
+                  {{ new Date(appointment.scheduled_at).toLocaleString() }} · {{ appointment.purpose }}
+                </p>
+              </div>
+              <span style="font-size: 12px; font-weight: bold; padding: 4px 8px; border-radius: 4px; background: #eee;">
+                {{ appointment.status }}
+              </span>
+            </div>
+            <div v-if="['pending', 'confirmed', 'reschedule_requested'].includes(appointment.status)" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; margin-top: 12px;">
+              <label style="font-size: 12px; color: #693e40;">
+                New date and time (optional)
+                <input v-model="appointment.scheduleInput" type="datetime-local" style="display: block; width: 100%; margin-top: 4px; padding: 7px; border: 1px solid #d5c4c4; border-radius: 5px;" />
+              </label>
+              <label style="font-size: 12px; color: #693e40;">
+                Message for student (optional)
+                <input v-model="appointment.studentMessage" type="text" maxlength="2000" style="display: block; width: 100%; margin-top: 4px; padding: 7px; border: 1px solid #d5c4c4; border-radius: 5px;" />
+              </label>
+            </div>
+            <div v-if="['pending', 'confirmed', 'reschedule_requested'].includes(appointment.status)" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px;">
+              <button
+                v-if="['pending', 'reschedule_requested'].includes(appointment.status)"
+                type="button"
+                style="background: #10662d; color: #fff; border: none; padding: 7px 12px; border-radius: 6px; font-weight: bold; cursor: pointer;"
+                @click="updateAppointmentStatus(appointment.id, 'confirmed', '', appointment.studentMessage)"
+              >
+                Confirm
+              </button>
+              <button
+                type="button"
+                style="background: #59080d; color: #fff; border: none; padding: 7px 12px; border-radius: 6px; font-weight: bold; cursor: pointer;"
+                @click="appointment.scheduleInput
+                  ? updateAppointmentStatus(appointment.id, 'confirmed', appointment.scheduleInput, appointment.studentMessage)
+                  : errorMessage = 'Choose a new date and time before rescheduling.'"
+              >
+                Reschedule & Confirm
+              </button>
+              <button
+                type="button"
+                style="background: #9b1c1c; color: #fff; border: none; padding: 7px 12px; border-radius: 6px; font-weight: bold; cursor: pointer;"
+                @click="updateAppointmentStatus(appointment.id, 'cancelled', '', appointment.studentMessage)"
+              >
+                Cancel Appointment
+              </button>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section v-if="['Registrar', 'Guidance', 'Office of Student Affairs'].includes(selectedOffice)" style="background: #fff; border-radius: 12px; padding: 24px; border: 1px solid #d5c4c4; margin-bottom: 24px;">
         <h2 style="margin: 0 0 16px; color: #59080d;">{{ selectedOffice }} Document & Service Requests</h2>
 
         <div v-if="requestsList.length === 0" style="padding: 20px; color: #7a5052;">No service requests found.</div>
@@ -591,6 +732,22 @@ onUnmounted(() => {
               <strong style="color: #59080d; font-size: 16px;">{{ r.title }}</strong>
               <p style="margin: 4px 0; font-size: 13px; color: #693e40;">Student: {{ r.profiles?.full_name || 'Student' }} ({{ r.profiles?.student_id || 'ID' }})</p>
               <p style="margin: 2px 0; font-size: 12px; color: #967f7f;">Details: {{ r.details }}</p>
+              <label style="display: block; margin-top: 10px; font-size: 12px; color: #693e40;">
+                Student instruction or response
+                <textarea
+                  v-model="requestInstructions[r.id]"
+                  rows="2"
+                  maxlength="2000"
+                  style="display: block; width: 100%; margin-top: 4px; padding: 7px; border: 1px solid #d5c4c4; border-radius: 5px;"
+                />
+              </label>
+              <button
+                type="button"
+                style="margin-top: 6px; background: #59080d; color: #fff; border: none; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 12px;"
+                @click="sendRequestInstruction(r)"
+              >
+                Send Student Update
+              </button>
             </div>
 
             <div style="display: flex; gap: 8px; align-items: center;">

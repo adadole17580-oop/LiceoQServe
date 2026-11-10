@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted } from "vue";
 import { supabase } from "../lib/supabase.js";
+import { useStudentDataSync } from "../composables/useStudentDataSync.js";
 import "../assets/styles/profile.css";
 
 const editing = ref(false);
@@ -34,6 +35,8 @@ const showPasswordFields = ref({
 });
 
 async function loadProfile() {
+  loading.value = true
+  profileError.value = ''
   try {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session?.user) throw new Error('Please sign in again to load your profile.')
@@ -59,7 +62,7 @@ async function loadProfile() {
       email: user.email || '',
       program: profileData.program || '',
       yearLevel: profileData.year_level || '',
-      contactNumber: user.user_metadata?.contact_number || '',
+      contactNumber: profileData.contact_number || '',
     }
     editedProfile.value = { ...profile.value }
   } catch (err) {
@@ -91,6 +94,7 @@ async function saveProfile() {
         .from('profiles')
         .update({
           full_name: fullName,
+          contact_number: editedProfile.value.contactNumber.trim() || null,
           updated_at: new Date().toISOString(),
         })
         .eq('id', session.user.id)
@@ -178,6 +182,8 @@ async function changePassword() {
 function togglePasswordVisibility(field) {
   showPasswordFields.value[field] = !showPasswordFields.value[field]
 }
+
+useStudentDataSync(loadProfile, [{ table: 'profiles', column: 'id' }])
 
 onMounted(() => {
   loadProfile()

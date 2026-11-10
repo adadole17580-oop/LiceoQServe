@@ -1,6 +1,7 @@
 import express from 'express'
 import { authenticateUser, requireRole } from '../middleware/auth.js'
 import { getAdminClient } from '../supabase.js'
+import { createStudentNotification } from '../utils/studentNotifications.js'
 
 const router = express.Router()
 
@@ -9,7 +10,7 @@ router.get('/my', authenticateUser, async (req, res) => {
     const adminClient = getAdminClient()
     const { data: appointments, error } = await adminClient
       .from('appointments')
-      .select('id, student_id, service_id, status, purpose, scheduled_at, created_at, office_services(id, name, office_id, offices(id, name))')
+      .select('id, student_id, service_id, status, purpose, scheduled_at, created_at, updated_at, office_services(id, name, office_id, offices(id, name))')
       .eq('student_id', req.user.id)
       .order('scheduled_at', { ascending: false })
 
@@ -154,7 +155,7 @@ router.post('/cancel', authenticateUser, async (req, res) => {
 
     const { data: appointment, error: fetchError } = await adminClient
       .from('appointments')
-      .select('id, student_id, status, service_id, scheduled_at, office_services(name, offices(name))')
+      .select('id, student_id, status, service_id, scheduled_at, updated_at, office_services(name, offices(name))')
       .eq('id', appointmentId)
       .single()
 
@@ -166,22 +167,60 @@ router.post('/cancel', authenticateUser, async (req, res) => {
       return res.status(403).json({ error: 'Forbidden: You can only cancel your own appointments.' })
     }
 
+    const cancelledByOffice = appointment.student_id !== req.user.id
     const currentStatus = String(appointment.status).toLowerCase()
     if (['cancelled', 'completed'].includes(currentStatus)) {
-      return res.status(400).json({ error: `Cannot cancel an appointment that is already ${appointment.status}.` })
+      if (currentStatus !== 'cancelled' || !cancelledByOffice) {
+        return res.status(400).json({ error: `Cannot cancel an appointment that is already ${appointment.status}.` })
+      }
+
+      const officeName = appointment.office_services?.offices?.name || 'Campus Office'
+      const transaction = appointment.office_services?.name || 'Appointment'
+      await createStudentNotification({
+        adminClient,
+        recipientId: appointment.student_id,
+        title: 'Appointment cancelled',
+        category: 'appointment',
+        message: `Your ${transaction} appointment with ${officeName} on ${new Date(appointment.scheduled_at).toLocaleString()} was cancelled by the office.`,
+        relatedId: appointment.id,
+        eventKey: `appointment:${appointment.id}:status:cancelled:${appointment.updated_at}`,
+        officeName,
+        transaction,
+      })
+      return res.json({ message: 'Appointment was cancelled successfully.' })
     }
 
     const now = new Date().toISOString()
-    const { error: updateError } = await adminClient
+    const { data: updated, error: updateError } = await adminClient
       .from('appointments')
       .update({
         status: 'cancelled',
         updated_at: now,
       })
       .eq('id', appointmentId)
+      .eq('status', appointment.status)
+      .select('id, student_id, status, service_id, scheduled_at, updated_at, office_services(name, offices(name))')
+      .maybeSingle()
 
     if (updateError) {
       return res.status(500).json({ error: updateError.message })
+    }
+    if (!updated) return res.status(409).json({ error: 'This appointment changed. Refresh and try again.' })
+
+    if (cancelledByOffice) {
+      const officeName = updated.office_services?.offices?.name || 'Campus Office'
+      const transaction = updated.office_services?.name || 'Appointment'
+      await createStudentNotification({
+        adminClient,
+        recipientId: updated.student_id,
+        title: 'Appointment cancelled',
+        category: 'appointment',
+        message: `Your ${transaction} appointment with ${officeName} on ${new Date(updated.scheduled_at).toLocaleString()} was cancelled by the office.`,
+        relatedId: updated.id,
+        eventKey: `appointment:${updated.id}:status:cancelled:${updated.updated_at}`,
+        officeName,
+        transaction,
+      })
     }
 
     res.json({
@@ -194,18 +233,28 @@ router.post('/cancel', authenticateUser, async (req, res) => {
 })
 
 router.post('/update-status', authenticateUser, requireRole(['staff', 'admin']), async (req, res) => {
-  const { appointmentId, status } = req.body
+  const { appointmentId, status, scheduledAt, message } = req.body || {}
   const validStatuses = ['confirmed', 'completed', 'cancelled', 'rejected', 'no_show']
 
   if (!appointmentId || !validStatuses.includes(status)) {
     return res.status(400).json({ error: `Valid appointmentId and status (${validStatuses.join(', ')}) required.` })
+  }
+  if (message !== undefined && (typeof message !== 'string' || message.trim().length > 2000)) {
+    return res.status(400).json({ error: 'The student message must be 2000 characters or fewer.' })
+  }
+  if (scheduledAt && status !== 'confirmed') {
+    return res.status(400).json({ error: 'A new appointment date and time can only be saved when confirming the appointment.' })
+  }
+  const newSchedule = scheduledAt ? new Date(scheduledAt) : null
+  if (scheduledAt && (Number.isNaN(newSchedule.getTime()) || newSchedule <= new Date())) {
+    return res.status(400).json({ error: 'Choose a valid appointment date and time in the future.' })
   }
 
   try {
     const adminClient = getAdminClient()
     const { data: appointment, error: fetchError } = await adminClient
       .from('appointments')
-      .select('id, office_services!inner(office_id)')
+      .select('id, student_id, status, scheduled_at, updated_at, service_id, office_services!inner(name, office_id, offices(name))')
       .eq('id', appointmentId)
       .maybeSingle()
 
@@ -219,30 +268,55 @@ router.post('/update-status', authenticateUser, requireRole(['staff', 'admin']),
       return res.status(403).json({ error: 'You are not authorized to manage appointments for this office.' })
     }
 
-    const { data: updated, error: updateError } = await adminClient
-      .from('appointments')
-      .update({
+    let updated = appointment
+    const scheduleChanged = newSchedule && newSchedule.toISOString() !== new Date(appointment.scheduled_at).toISOString()
+    let appointmentChanged = false
+    if (appointment.status !== status || scheduleChanged) {
+      const now = new Date().toISOString()
+      const updateData = {
         status,
         handled_by: req.user.id,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', appointmentId)
-      .select('id, student_id, status, scheduled_at, service_id, office_services(name, offices(name))')
-      .single()
+        updated_at: now,
+      }
+      if (newSchedule) updateData.scheduled_at = newSchedule.toISOString()
 
-    if (updateError) {
-      return res.status(500).json({ error: updateError.message })
+      const { data, error: updateError } = await adminClient
+        .from('appointments')
+        .update(updateData)
+        .eq('id', appointmentId)
+        .eq('status', appointment.status)
+        .select('id, student_id, status, scheduled_at, updated_at, service_id, office_services(name, office_id, offices(name))')
+        .maybeSingle()
+
+      if (updateError) {
+        return res.status(500).json({ error: updateError.message })
+      }
+      if (!data) {
+        return res.status(409).json({ error: 'This appointment changed. Refresh the list and try again.' })
+      }
+      updated = data
+      appointmentChanged = true
     }
 
-    await adminClient.from('notifications').insert({
-      recipient_id: updated.student_id,
-      title: `Appointment ${status}`,
+    const officeName = updated.office_services?.offices?.name || 'Campus Office'
+    const transaction = updated.office_services?.name || 'Appointment'
+    const scheduleText = scheduleChanged
+      ? ` It has been rescheduled to ${new Date(updated.scheduled_at).toLocaleString()}.`
+      : ''
+    const additionalMessage = message?.trim() ? ` ${message.trim()}` : ''
+    await createStudentNotification({
+      adminClient,
+      recipientId: updated.student_id,
+      title: scheduleChanged ? 'Appointment rescheduled' : `Appointment ${status}`,
       category: 'appointment',
-      message: `Your appointment with ${updated.office_services?.offices?.name || 'office'} on ${new Date(updated.scheduled_at).toLocaleDateString()} has been ${status.toLowerCase()}.`,
-      is_read: false,
+      message: `Your ${transaction} appointment with ${officeName} on ${new Date(updated.scheduled_at).toLocaleString()} has been ${scheduleChanged ? 'rescheduled and confirmed' : status}.${scheduleText}${additionalMessage}`,
+      relatedId: updated.id,
+      eventKey: `appointment:${updated.id}:status:${status}:${updated.updated_at}`,
+      officeName,
+      transaction,
     })
 
-    if (status === 'completed') {
+    if (status === 'completed' && appointmentChanged) {
       await adminClient.from('service_history').insert({
         student_id: updated.student_id,
         service_id: updated.service_id,

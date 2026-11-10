@@ -1,8 +1,9 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
 import { useAuth } from '../composables/useAuth.js'
+import { useStudentDataSync } from '../composables/useStudentDataSync.js'
 import '../assets/styles/home.css'
 
 const router = useRouter()
@@ -21,8 +22,10 @@ const activeQueueTicket = ref(null)
 const upcomingAppointmentsCount = ref(0)
 const activeRequestsCount = ref(0)
 const nextAppointments = ref([])
+const loadError = ref('')
 
 async function loadDashboardData() {
+  loadError.value = ''
   try {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session?.user) return
@@ -41,12 +44,13 @@ async function loadDashboardData() {
       console.error('Error loading active queue ticket:', error)
     }
 
-    const { data: appointments, count: aptCount } = await supabase
+    const { data: appointments, count: aptCount, error: appointmentsError } = await supabase
       .from('appointments')
       .select('id, scheduled_at, purpose, status, office_services(name, offices(name))', { count: 'exact' })
       .eq('student_id', userId)
       .in('status', ['pending', 'confirmed', 'reschedule_requested', 'Pending', 'Confirmed'])
       .order('scheduled_at', { ascending: true })
+    if (appointmentsError) throw appointmentsError
 
     upcomingAppointmentsCount.value = aptCount || 0
     if (appointments) {
@@ -66,21 +70,27 @@ async function loadDashboardData() {
       }))
     }
 
-    const { count: reqCount } = await supabase
+    const { count: reqCount, error: requestsError } = await supabase
       .from('service_requests')
       .select('id', { count: 'exact', head: true })
       .eq('student_id', userId)
       .in('status', ['pending', 'processing', 'ready_for_pickup', 'Submitted', 'Processing', 'Ready for Pickup'])
+    if (requestsError) throw requestsError
 
     activeRequestsCount.value = reqCount || 0
   } catch (err) {
     console.error('Error loading dashboard data:', err)
+    loadError.value = err.message || 'Could not load your dashboard data.'
   }
 }
 
-onMounted(() => {
-  loadDashboardData()
-})
+useStudentDataSync(loadDashboardData, [
+  { table: 'queues' },
+  { table: 'appointments' },
+  { table: 'service_requests' },
+])
+
+onMounted(loadDashboardData)
 </script>
 
 <template>
@@ -92,6 +102,11 @@ onMounted(() => {
         Monitor your campus transactions and know exactly what to do next.
       </p>
     </section>
+
+    <p v-if="loadError" role="alert">
+      {{ loadError }}
+      <button type="button" @click="loadDashboardData">Try Again</button>
+    </p>
 
     <section class="summary">
       <article style="cursor: pointer;" @click="router.push('/student/queue')">

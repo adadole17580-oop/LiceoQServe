@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, onMounted } from "vue";
 import { supabase } from "../lib/supabase.js";
+import { useStudentDataSync } from "../composables/useStudentDataSync.js";
 import "../assets/styles/history.css";
 
 const activeFilter = ref("All");
@@ -59,6 +60,8 @@ async function fetchServiceHistory() {
 function closeDetails() {
   selectedTransaction.value = null;
 }
+
+useStudentDataSync(fetchServiceHistory, [{ table: 'service_history' }])
 
 onMounted(() => {
   fetchServiceHistory()

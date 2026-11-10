@@ -1,6 +1,7 @@
 import express from 'express'
 import { authenticateUser, requireRole } from '../middleware/auth.js'
 import { getAdminClient } from '../supabase.js'
+import { createStudentNotification } from '../utils/studentNotifications.js'
 
 const router = express.Router()
 
@@ -180,7 +181,7 @@ router.post('/cancel', authenticateUser, async (req, res) => {
 
     const { data: reservation, error: fetchError } = await adminClient
       .from('reservations')
-      .select('id, student_id, status, room_id, rooms(name)')
+      .select('id, student_id, status, room_id, start_at, updated_at, rooms(name), office_services(name)')
       .eq('id', reservationId)
       .single()
 
@@ -192,20 +193,57 @@ router.post('/cancel', authenticateUser, async (req, res) => {
       return res.status(403).json({ error: 'Forbidden: You can only cancel your own reservations.' })
     }
 
+    const cancelledByOffice = reservation.student_id !== req.user.id
     if (['Cancelled', 'Completed'].includes(reservation.status)) {
-      return res.status(400).json({ error: `Cannot cancel a reservation that is already ${reservation.status}.` })
+      if (reservation.status !== 'Cancelled' || !cancelledByOffice) {
+        return res.status(400).json({ error: `Cannot cancel a reservation that is already ${reservation.status}.` })
+      }
+
+      const roomName = reservation.rooms?.name || 'Discussion Room'
+      await createStudentNotification({
+        adminClient,
+        recipientId: reservation.student_id,
+        title: 'Room Reservation Cancelled',
+        category: 'reservation',
+        message: `Your reservation for ${roomName} on ${new Date(reservation.start_at).toLocaleString()} was cancelled by the office.`,
+        relatedId: reservation.id,
+        eventKey: `reservation:${reservation.id}:status:Cancelled:${reservation.updated_at}`,
+        officeName: 'Library',
+        transaction: `Room reservation for ${roomName}`,
+      })
+      return res.json({ message: `Reservation for ${roomName} was cancelled.` })
     }
 
-    const { error: updateError } = await adminClient
+    const now = new Date().toISOString()
+    const { data: updated, error: updateError } = await adminClient
       .from('reservations')
       .update({
         status: 'Cancelled',
-        updated_at: new Date().toISOString(),
+        updated_at: now,
       })
       .eq('id', reservationId)
+      .eq('status', reservation.status)
+      .select('id, student_id, status, start_at, updated_at, rooms(name)')
+      .maybeSingle()
 
     if (updateError) {
       return res.status(500).json({ error: updateError.message })
+    }
+    if (!updated) return res.status(409).json({ error: 'This reservation changed. Refresh and try again.' })
+
+    if (cancelledByOffice) {
+      const roomName = updated.rooms?.name || 'Discussion Room'
+      await createStudentNotification({
+        adminClient,
+        recipientId: updated.student_id,
+        title: 'Room Reservation Cancelled',
+        category: 'reservation',
+        message: `Your reservation for ${roomName} on ${new Date(updated.start_at).toLocaleString()} was cancelled by the office.`,
+        relatedId: updated.id,
+        eventKey: `reservation:${updated.id}:status:Cancelled:${updated.updated_at}`,
+        officeName: 'Library',
+        transaction: `Room reservation for ${roomName}`,
+      })
     }
 
     res.json({
@@ -240,36 +278,54 @@ router.post('/update-status', authenticateUser, requireRole(['staff', 'admin']),
       })
       .eq('id', reservationId)
       .in('status', allowedFrom)
-      .select('id, student_id, status, service_id, room_id, rooms(name)')
+      .select('id, student_id, status, service_id, room_id, start_at, end_at, updated_at, rooms(name)')
       .maybeSingle()
 
     if (updateError) {
       return res.status(500).json({ error: updateError.message })
     }
-    if (!updated) {
-      return res.status(409).json({ error: 'Reservation status changed or is no longer eligible for this action.' })
+    let currentReservation = updated
+    const statusChanged = Boolean(updated)
+    if (!currentReservation) {
+      const { data: current, error: lookupError } = await adminClient
+        .from('reservations')
+        .select('id, student_id, status, service_id, room_id, start_at, end_at, updated_at, rooms(name)')
+        .eq('id', reservationId)
+        .maybeSingle()
+
+      if (lookupError) return res.status(500).json({ error: lookupError.message })
+      if (!current || current.status !== status) {
+        return res.status(409).json({ error: 'Reservation status changed or is no longer eligible for this action.' })
+      }
+      currentReservation = current
     }
 
-    await adminClient.from('notifications').insert({
-      recipient_id: updated.student_id,
+    const officeName = 'Library'
+    const transaction = `Room reservation for ${currentReservation.rooms?.name || 'Library Room'}`
+    await createStudentNotification({
+      adminClient,
+      recipientId: currentReservation.student_id,
       title: `Room Reservation ${status}`,
       category: 'reservation',
-      message: `Your reservation for ${updated.rooms?.name || 'Discussion Room'} has been ${status.toLowerCase()}.`,
-      is_read: false,
+      message: `Your reservation for ${currentReservation.rooms?.name || 'Discussion Room'} on ${new Date(currentReservation.start_at).toLocaleString()} has been ${status.toLowerCase()}.`,
+      relatedId: currentReservation.id,
+      eventKey: `reservation:${currentReservation.id}:status:${status}:${currentReservation.updated_at}`,
+      officeName,
+      transaction,
     })
 
-    if (status === 'Completed') {
+    if (status === 'Completed' && statusChanged) {
       await adminClient.from('service_history').insert({
-        student_id: updated.student_id,
-        service_id: updated.service_id,
-        transaction_id: updated.id,
+        student_id: currentReservation.student_id,
+        service_id: currentReservation.service_id,
+        transaction_id: currentReservation.id,
         transaction_type: 'Reservation',
-        title: `Library Room Reservation: ${updated.rooms?.name || 'Room'}`,
+        title: `Library Room Reservation: ${currentReservation.rooms?.name || 'Room'}`,
         completed_at: new Date().toISOString(),
       })
     }
 
-    res.json({ message: `Reservation status updated to ${status}.`, reservation: updated })
+    res.json({ message: `Reservation status updated to ${status}.`, reservation: currentReservation })
   } catch (err) {
     console.error('Error updating reservation status:', err)
     res.status(500).json({ error: 'Internal server error.' })

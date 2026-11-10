@@ -1,7 +1,10 @@
 import express from 'express'
+import { randomUUID } from 'node:crypto'
 import { authenticateUser, requireRole } from '../middleware/auth.js'
 import { getAdminClient } from '../supabase.js'
 import { formatQueueNumber } from '../utils/queueNumber.js'
+import { sendStudentNotificationEmail, sendTestStudentNotificationEmail } from '../utils/studentNotifications.js'
+import { isGeneralPostNotification } from '../utils/generalPostEmailDelivery.js'
 
 const router = express.Router()
 
@@ -123,7 +126,7 @@ router.get('/requests-list', async (req, res) => {
     const adminClient = getAdminClient()
     let query = adminClient
       .from('service_requests')
-      .select('id, student_id, request_type, title, details, status, submitted_at, completed_at, profiles(full_name, student_id), office_services!inner(name, office_id)')
+      .select('id, student_id, request_type, title, details, status, submitted_at, completed_at, profiles:profiles!service_requests_student_id_fkey(full_name, student_id), office_services!inner(name, office_id, offices!inner(name))')
       .order('submitted_at', { ascending: false })
 
     if (staffOfficeId) {
@@ -147,7 +150,7 @@ router.get('/appointments-list', async (req, res) => {
     const adminClient = getAdminClient()
     let query = adminClient
       .from('appointments')
-      .select('id, scheduled_at, purpose, status, created_at, profiles(full_name, student_id), office_services!inner(name, office_id)')
+      .select('id, student_id, service_id, scheduled_at, end_at, purpose, status, created_at, updated_at, profiles:profiles!appointments_student_id_fkey(full_name, student_id), office_services!inner(name, office_id, offices!inner(name))')
       .order('scheduled_at', { ascending: true })
 
     if (staffOfficeId) {
@@ -163,5 +166,80 @@ router.get('/appointments-list', async (req, res) => {
     res.status(500).json({ error: 'Internal server error.' })
   }
 })
+
+router.post('/notifications/:notificationId/retry-email', async (req, res) => {
+  if (req.profile.role !== 'admin') {
+    return res.status(403).json({ error: 'Only administrators can retry announcement email delivery.' })
+  }
+
+  try {
+    const adminClient = getAdminClient()
+    const { data: notification, error } = await adminClient
+      .from('notifications')
+      .select('id, recipient_id, title, category, message, event_key')
+      .eq('id', req.params.notificationId)
+      .maybeSingle()
+
+    if (error) return res.status(500).json({ error: 'Could not load the notification for retry.' })
+    if (!notification || !isGeneralPostNotification(notification)) {
+      return res.status(404).json({ error: 'General post notification was not found.' })
+    }
+
+    const accepted = await sendStudentNotificationEmail({
+      adminClient,
+      recipientId: notification.recipient_id,
+      title: notification.title,
+      category: notification.category,
+      message: notification.message,
+      eventKey: notification.event_key,
+      officeName: notification.message?.match(/^Office: (.+)$/m)?.[1],
+      transaction: 'Campus update',
+    })
+
+    if (!accepted) {
+      return res.status(502).json({ error: 'Resend did not confirm email acceptance. See the backend delivery log before retrying.' })
+    }
+    return res.json({ accepted: true })
+  } catch (error) {
+    console.error('Could not retry general post email:', error)
+    return res.status(500).json({ error: 'Could not retry general post email.' })
+  }
+})
+
+if (process.env.NODE_ENV !== 'production' && process.env.ENABLE_TEST_EMAIL_ENDPOINT === 'true') {
+  router.post('/test-email', async (req, res) => {
+    if (req.profile.role !== 'admin') {
+      return res.status(403).json({ error: 'Only administrators can send a test email.' })
+    }
+
+    const recipientEmail = typeof req.body?.recipientEmail === 'string'
+      ? req.body.recipientEmail.trim()
+      : ''
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipientEmail)) {
+      return res.status(400).json({ error: 'Provide a valid recipientEmail address.' })
+    }
+
+    try {
+      const result = await sendTestStudentNotificationEmail({
+        recipientEmail,
+        eventKey: `email-test:${randomUUID()}`,
+      })
+      if (!result.accepted) {
+        const status = result.reason === 'email_provider_not_configured' ? 503 : 502
+        return res.status(status).json({
+          accepted: false,
+          error: result.reason === 'email_provider_not_configured'
+            ? 'Configure RESEND_API_KEY and EMAIL_FROM in the backend environment.'
+            : 'Resend did not confirm acceptance of the test email.',
+        })
+      }
+
+      return res.json({ accepted: true })
+    } catch (error) {
+      console.error('Could not send test email:', error)
+      return res.status(500).json({ error: 'Could not send the test email.' })
+    }
+  })
+}
 
 export default router

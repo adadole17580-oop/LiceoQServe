@@ -2,6 +2,7 @@ import express from 'express'
 import { authenticateUser, requireRole } from '../middleware/auth.js'
 import { getAdminClient } from '../supabase.js'
 import { formatQueueNumber } from '../utils/queueNumber.js'
+import { createStudentNotification } from '../utils/studentNotifications.js'
 
 const router = express.Router()
 
@@ -172,7 +173,7 @@ router.post('/cancel', authenticateUser, async (req, res) => {
 
     const { data: ticket, error: fetchError } = await adminClient
       .from('queues')
-      .select('id, student_id, status, queue_number, service_id, office_services(name, office_id, offices(name))')
+      .select('id, student_id, status, queue_number, service_id, finished_at, office_services(name, office_id, offices(name))')
       .eq('id', queueId)
       .single()
 
@@ -226,7 +227,7 @@ router.post('/call-next', authenticateUser, requireRole(['staff', 'admin']), asy
 
     let servingQuery = adminClient
       .from('queues')
-      .select('id, office_services!inner(office_id)')
+      .select('id, student_id, queue_number, called_at, office_services!inner(office_id, offices(name))')
       .eq('status', 'being_served')
 
     if (staffOfficeId) {
@@ -236,6 +237,19 @@ router.post('/call-next', authenticateUser, requireRole(['staff', 'admin']), asy
     const { data: servingTicket, error: servingError } = await servingQuery.limit(1).maybeSingle()
     if (servingError) return res.status(500).json({ error: servingError.message })
     if (servingTicket) {
+      const officeName = servingTicket.office_services?.offices?.name || 'Campus Office'
+      const queueNumber = formatQueueNumber(servingTicket.queue_number, officeName)
+      await createStudentNotification({
+        adminClient,
+        recipientId: servingTicket.student_id,
+        title: 'Your number is being served!',
+        category: 'queue',
+        message: `Your ticket ${queueNumber} is now being served at the ${officeName} counter.`,
+        relatedId: servingTicket.id,
+        eventKey: `queue:${servingTicket.id}:being-served:${servingTicket.called_at}`,
+        officeName,
+        transaction: `Queue ticket ${queueNumber}`,
+      })
       return res.status(409).json({ error: 'Finish or recall the currently serving ticket before calling another.' })
     }
 
@@ -262,13 +276,13 @@ router.post('/call-next', authenticateUser, requireRole(['staff', 'admin']), asy
 
     const nextTicket = tickets[0]
 
-    const now = new Date().toISOString()
+    const calledAt = new Date().toISOString()
     const { data: updated, error: updateError } = await adminClient
       .from('queues')
       .update({
         status: 'being_served',
         handled_by: req.user.id,
-        called_at: now,
+        called_at: calledAt,
       })
       .eq('id', nextTicket.id)
       .eq('status', 'waiting')
@@ -287,12 +301,18 @@ router.post('/call-next', authenticateUser, requireRole(['staff', 'admin']), asy
       event_type: 'called',
     })
 
-    await adminClient.from('notifications')    .insert({
-      recipient_id: nextTicket.student_id,
+    const officeName = nextTicket.office_services?.offices?.name || 'Campus Office'
+    const queueNumber = formatQueueNumber(nextTicket.queue_number, officeName)
+    await createStudentNotification({
+      adminClient,
+      recipientId: nextTicket.student_id,
       title: 'Your number is being served!',
       category: 'queue',
-      message: `Your ticket ${formatQueueNumber(nextTicket.queue_number, nextTicket.office_services?.offices?.name)} is now being served at the counter.`,
-      is_read: false,
+      message: `Your ticket ${queueNumber} is now being served at the ${officeName} counter.`,
+      relatedId: nextTicket.id,
+      eventKey: `queue:${nextTicket.id}:being-served:${calledAt}`,
+      officeName,
+      transaction: `Queue ticket ${queueNumber}`,
     })
 
     res.json({
@@ -316,7 +336,7 @@ router.post('/recall', authenticateUser, requireRole(['staff', 'admin']), async 
     const adminClient = getAdminClient()
     const { data: ticket, error: fetchError } = await adminClient
       .from('queues')
-      .select('id, student_id, status, queue_number, office_services(office_id, offices(name))')
+      .select('id, student_id, status, queue_number, recall_count, office_services(office_id, offices(name))')
       .eq('id', queueId)
       .maybeSingle()
 
@@ -332,20 +352,37 @@ router.post('/recall', authenticateUser, requireRole(['staff', 'admin']), async 
       return res.status(403).json({ error: 'You are not authorized to recall tickets for this office.' })
     }
 
-    const { error: notificationError } = await adminClient.from('notifications').insert({
-      recipient_id: ticket.student_id,
+    const recalledAt = new Date().toISOString()
+    const { data: recalledTicket, error: recallError } = await adminClient
+      .from('queues')
+      .update({
+        recall_count: (ticket.recall_count || 0) + 1,
+        recalled_at: recalledAt,
+      })
+      .eq('id', queueId)
+      .eq('status', 'being_served')
+      .select('id')
+      .maybeSingle()
+
+    if (recallError) return res.status(500).json({ error: recallError.message })
+    if (!recalledTicket) return res.status(409).json({ error: 'The queue ticket changed. Refresh the queue and try again.' })
+
+    const officeName = ticket.office_services?.offices?.name || 'Campus Office'
+    const queueNumber = formatQueueNumber(ticket.queue_number, officeName)
+    await createStudentNotification({
+      adminClient,
+      recipientId: ticket.student_id,
       title: 'Your queue number is being recalled',
       category: 'queue',
-      message: `Please proceed to the counter. Your ticket ${formatQueueNumber(ticket.queue_number, ticket.office_services?.offices?.name)} is still being served.`,
-      is_read: false,
+      message: `Please proceed to the ${officeName} counter. Your ticket ${queueNumber} is still being served.`,
+      relatedId: ticket.id,
+      eventKey: `queue:${ticket.id}:recall:${recalledAt}`,
+      officeName,
+      transaction: `Queue ticket ${queueNumber}`,
     })
 
-    if (notificationError) {
-      return res.status(500).json({ error: notificationError.message })
-    }
-
     return res.json({
-      message: `Ticket ${formatQueueNumber(ticket.queue_number, ticket.office_services?.offices?.name)} recalled.`,
+      message: `Ticket ${queueNumber} recalled.`,
     })
   } catch (err) {
     console.error('Error recalling queue ticket:', err)
@@ -366,7 +403,7 @@ router.post('/complete', authenticateUser, requireRole(['staff', 'admin']), asyn
 
     const { data: ticket, error: fetchError } = await adminClient
       .from('queues')
-      .select('id, student_id, status, queue_number, service_id, office_services(name, office_id, offices(name))')
+      .select('id, student_id, status, queue_number, service_id, finished_at, office_services(name, office_id, offices(name))')
       .eq('id', queueId)
       .single()
 
@@ -380,35 +417,38 @@ router.post('/complete', authenticateUser, requireRole(['staff', 'admin']), asyn
     ) {
       return res.status(403).json({ error: 'Forbidden: You cannot complete tickets for another office.' })
     }
-    if (ticket.status !== 'being_served') {
+    const alreadyCompleted = ticket.status === finalStatus && ticket.finished_at
+    if (ticket.status !== 'being_served' && !alreadyCompleted) {
       return res.status(400).json({ error: 'Only the currently serving ticket can be completed.' })
     }
 
-    const now = new Date().toISOString()
-    const { data: completedTicket, error: updateError } = await adminClient
-      .from('queues')
-      .update({
-        status: finalStatus,
-        finished_at: now,
+    const now = alreadyCompleted ? ticket.finished_at : new Date().toISOString()
+    if (!alreadyCompleted) {
+      const { data: completedTicket, error: updateError } = await adminClient
+        .from('queues')
+        .update({
+          status: finalStatus,
+          finished_at: now,
+        })
+        .eq('id', queueId)
+        .eq('status', 'being_served')
+        .select('id')
+        .maybeSingle()
+
+      if (updateError) {
+        return res.status(500).json({ error: updateError.message })
+      }
+      if (!completedTicket) {
+        return res.status(409).json({ error: 'This queue ticket is no longer being served. Refresh the queue and try again.' })
+      }
+
+      await adminClient.from('queue_events').insert({
+        queue_id: queueId,
+        event_type: finalStatus.toLowerCase(),
       })
-      .eq('id', queueId)
-      .eq('status', 'being_served')
-      .select('id')
-      .maybeSingle()
-
-    if (updateError) {
-      return res.status(500).json({ error: updateError.message })
-    }
-    if (!completedTicket) {
-      return res.status(409).json({ error: 'This queue ticket is no longer being served. Refresh the queue and try again.' })
     }
 
-    await adminClient.from('queue_events').insert({
-      queue_id: queueId,
-      event_type: finalStatus.toLowerCase(),
-    })
-
-    if (finalStatus === 'finished') {
+    if (finalStatus === 'finished' && !alreadyCompleted) {
       const { error: historyError } = await adminClient.from('service_history').insert({
         student_id: ticket.student_id,
         service_id: ticket.service_id,
@@ -423,15 +463,29 @@ router.post('/complete', authenticateUser, requireRole(['staff', 'admin']), asyn
       }
     }
 
+    const officeName = ticket.office_services?.offices?.name || 'Campus Office'
+    const queueNumber = formatQueueNumber(ticket.queue_number, officeName)
+    await createStudentNotification({
+      adminClient,
+      recipientId: ticket.student_id,
+      title: `Queue ticket ${finalStatus === 'finished' ? 'completed' : 'skipped'}`,
+      category: 'queue',
+      message: `Your ticket ${queueNumber} at ${officeName} was marked as ${finalStatus === 'finished' ? 'finished' : 'skipped'}.`,
+      relatedId: ticket.id,
+      eventKey: `queue:${ticket.id}:status:${finalStatus}:${now}`,
+      officeName,
+      transaction: `Queue ticket ${queueNumber}`,
+    })
+
     if (finalStatus === 'skipped') {
       return res.json({
-        message: `Queue ${formatQueueNumber(ticket.queue_number, ticket.office_services?.offices?.name)} was marked as skipped. Call the next ticket when ready.`,
+        message: `Queue ${queueNumber} was marked as skipped. Call the next ticket when ready.`,
       })
     }
 
     const { data: currentServingTicket, error: servingCheckError } = await adminClient
       .from('queues')
-      .select('id, queue_number, office_services!inner(office_id, offices(name))')
+      .select('id, student_id, called_at, queue_number, office_services!inner(office_id, offices(name))')
       .eq('status', 'being_served')
       .eq('office_services.office_id', ticket.office_services?.office_id)
       .limit(1)
@@ -445,6 +499,18 @@ router.post('/complete', authenticateUser, requireRole(['staff', 'admin']), asyn
     }
 
     if (currentServingTicket) {
+      const currentQueueNumber = formatQueueNumber(currentServingTicket.queue_number, officeName)
+      await createStudentNotification({
+        adminClient,
+        recipientId: currentServingTicket.student_id,
+        title: 'Your number is being served!',
+        category: 'queue',
+        message: `Your ticket ${currentQueueNumber} is now being served at the ${officeName} counter.`,
+        relatedId: currentServingTicket.id,
+        eventKey: `queue:${currentServingTicket.id}:being-served:${currentServingTicket.called_at}`,
+        officeName,
+        transaction: `Queue ticket ${currentQueueNumber}`,
+      })
       return res.json({
         message: `Queue ${formatQueueNumber(ticket.queue_number, ticket.office_services?.offices?.name)} marked as ${finalStatus}. Ticket ${formatQueueNumber(currentServingTicket.queue_number, ticket.office_services?.offices?.name)} is now serving.`,
       })
@@ -477,7 +543,7 @@ router.post('/complete', authenticateUser, requireRole(['staff', 'admin']), asyn
         })
         .eq('id', waitingTicket.id)
         .eq('status', 'waiting')
-        .select('id, student_id, queue_number')
+        .select('id, student_id, queue_number, called_at')
         .maybeSingle()
 
       if (callError) {
@@ -489,17 +555,28 @@ router.post('/complete', authenticateUser, requireRole(['staff', 'admin']), asyn
 
       if (calledTicket) {
         nextTicket = calledTicket
+        const nextCalledAt = calledTicket.called_at || new Date().toISOString()
         const { error: nextEventError } = await adminClient.from('queue_events').insert({
           queue_id: calledTicket.id,
           event_type: 'called',
         })
-        const { error: nextNotificationError } = await adminClient.from('notifications').insert({
-          recipient_id: calledTicket.student_id,
-          title: 'Your number is being served!',
-          category: 'queue',
-          message: `Your ticket ${formatQueueNumber(calledTicket.queue_number, ticket.office_services?.offices?.name)} is now being served at the counter.`,
-          is_read: false,
-        })
+        let nextNotificationError = null
+        try {
+          const nextQueueNumber = formatQueueNumber(calledTicket.queue_number, officeName)
+          await createStudentNotification({
+            adminClient,
+            recipientId: calledTicket.student_id,
+            title: 'Your number is being served!',
+            category: 'queue',
+            message: `Your ticket ${nextQueueNumber} is now being served at the ${officeName} counter.`,
+            relatedId: calledTicket.id,
+            eventKey: `queue:${calledTicket.id}:being-served:${nextCalledAt}`,
+            officeName,
+            transaction: `Queue ticket ${nextQueueNumber}`,
+          })
+        } catch (error) {
+          nextNotificationError = error
+        }
 
         if (nextEventError || nextNotificationError) {
           console.error('Next ticket was called, but its event or notification could not be recorded:', {

@@ -1,6 +1,7 @@
 import express from 'express'
 import { authenticateUser, requireRole } from '../middleware/auth.js'
 import { getAdminClient } from '../supabase.js'
+import { createStudentNotification } from '../utils/studentNotifications.js'
 
 const router = express.Router()
 
@@ -238,6 +239,30 @@ router.post('/issue-loan', authenticateUser, requireRole(['staff', 'admin']), re
       if (!request || request.student_id !== studentId || !request.title.startsWith('Book Borrow Request:')) {
         return res.status(404).json({ error: 'The matching Library book borrowing request was not found.' })
       }
+
+      const { data: priorLoan, error: priorLoanError } = await adminClient
+        .from('book_loans')
+        .select('id, book_id, student_id, status, borrowed_at, due_at, returned_at, library_books(title)')
+        .eq('source_request_id', requestId)
+        .maybeSingle()
+
+      if (priorLoanError) return res.status(500).json({ error: priorLoanError.message })
+      if (priorLoan) {
+        const title = priorLoan.library_books?.title || request.title.replace('Book Borrow Request: ', '')
+        await createStudentNotification({
+          adminClient,
+          recipientId: studentId,
+          title: 'Book Issued',
+          category: 'library',
+          message: `"${title}" has been issued to you. Due date: ${new Date(priorLoan.due_at).toLocaleDateString()}.`,
+          relatedId: priorLoan.id,
+          eventKey: `book-loan:${priorLoan.id}:issued`,
+          officeName: 'Library',
+          transaction: `Library book loan: ${title}`,
+        })
+        return res.status(200).json({ message: 'This borrowing request has already been processed.', loan: priorLoan })
+      }
+
       const requestStatus = String(request.status).trim().toLowerCase()
       if (!['pending', 'processing', 'submitted'].includes(requestStatus)) {
         return res.status(409).json({ error: `This borrowing request is already ${request.status}.` })
@@ -296,12 +321,38 @@ router.post('/issue-loan', authenticateUser, requireRole(['staff', 'admin']), re
       .insert({
         student_id: studentId,
         book_id: resolvedBookId,
+        source_request_id: requestId || null,
         status: 'Borrowed',
         borrowed_at: now,
         due_at: parsedDueDate.toISOString(),
       })
       .select()
       .single()
+
+    if (loanError?.code === '23505' && requestId) {
+      const { data: priorLoan, error: priorLoanError } = await adminClient
+        .from('book_loans')
+        .select('id, book_id, student_id, status, borrowed_at, due_at, returned_at, library_books(title)')
+        .eq('source_request_id', requestId)
+        .maybeSingle()
+
+      if (priorLoanError) return res.status(500).json({ error: priorLoanError.message })
+      if (priorLoan) {
+        const title = priorLoan.library_books?.title || 'Library Book'
+        await createStudentNotification({
+          adminClient,
+          recipientId: studentId,
+          title: 'Book Issued',
+          category: 'library',
+          message: `"${title}" has been issued to you. Due date: ${new Date(priorLoan.due_at).toLocaleDateString()}.`,
+          relatedId: priorLoan.id,
+          eventKey: `book-loan:${priorLoan.id}:issued`,
+          officeName: 'Library',
+          transaction: `Library book loan: ${title}`,
+        })
+        return res.status(200).json({ message: 'This borrowing request has already been processed.', loan: priorLoan })
+      }
+    }
 
     if (loanError) {
       return res.status(500).json({ error: loanError.message })
@@ -326,12 +377,16 @@ router.post('/issue-loan', authenticateUser, requireRole(['staff', 'admin']), re
         .eq('id', requestId)
     }
 
-    await adminClient.from('notifications').insert({
-      recipient_id: studentId,
+    await createStudentNotification({
+      adminClient,
+      recipientId: studentId,
       title: 'Book Issued',
       category: 'library',
       message: `"${book.title}" has been issued to you. Due date: ${new Date(dueDate).toLocaleDateString()}.`,
-      is_read: false,
+      relatedId: loan.id,
+      eventKey: `book-loan:${loan.id}:issued`,
+      officeName: 'Library',
+      transaction: `Library book loan: ${book.title}`,
     })
 
     res.status(201).json({
@@ -356,7 +411,7 @@ router.post('/return-book', authenticateUser, requireRole(['staff', 'admin']), r
 
     const { data: loan, error: fetchError } = await adminClient
       .from('book_loans')
-      .select('id, student_id, book_id, status, library_books(id, title, available_copies)')
+      .select('id, student_id, book_id, status, returned_at, library_books(id, title, available_copies)')
       .eq('id', loanId)
       .single()
 
@@ -365,7 +420,19 @@ router.post('/return-book', authenticateUser, requireRole(['staff', 'admin']), r
     }
 
     if (loan.status === 'Returned') {
-      return res.status(400).json({ error: 'Book has already been returned.' })
+      const bookTitle = loan.library_books?.title || 'Library Book'
+      await createStudentNotification({
+        adminClient,
+        recipientId: loan.student_id,
+        title: 'Book Return Recorded',
+        category: 'library',
+        message: `"${bookTitle}" was recorded as returned on ${new Date(loan.returned_at).toLocaleString()}.`,
+        relatedId: loan.id,
+        eventKey: `book-loan:${loan.id}:returned:${loan.returned_at}`,
+        officeName: 'Library',
+        transaction: `Library book return: ${bookTitle}`,
+      })
+      return res.json({ message: `Book "${bookTitle}" was already returned.` })
     }
 
     const now = new Date().toISOString()
@@ -389,6 +456,18 @@ router.post('/return-book', authenticateUser, requireRole(['staff', 'admin']), r
         updated_at: now,
       })
       .eq('id', loan.book_id)
+
+    await createStudentNotification({
+      adminClient,
+      recipientId: loan.student_id,
+      title: 'Book Return Recorded',
+      category: 'library',
+      message: `"${loan.library_books?.title || 'Library Book'}" was recorded as returned on ${new Date(now).toLocaleString()}.`,
+      relatedId: loan.id,
+      eventKey: `book-loan:${loan.id}:returned:${now}`,
+      officeName: 'Library',
+      transaction: `Library book return: ${loan.library_books?.title || 'Library Book'}`,
+    })
 
     await adminClient.from('service_history').insert({
       student_id: loan.student_id,

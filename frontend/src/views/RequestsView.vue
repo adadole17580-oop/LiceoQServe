@@ -1,8 +1,11 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
+import { useStudentDataSync } from '../composables/useStudentDataSync.js'
 import '../assets/styles/requests.css'
 
+const route = useRoute()
 const requests = ref([])
 const services = ref([])
 const loading = ref(true)
@@ -125,6 +128,12 @@ async function fetchMyRequests() {
       office: request.office_services?.offices?.name || 'Campus Office',
       service: request.title || request.office_services?.name || 'Service request',
     }))
+    const recordId = typeof route.query.record === 'string' ? route.query.record : ''
+    if (recordId) {
+      selectedRequest.value = requests.value.find((request) => request.id === recordId) || null
+    } else if (selectedRequest.value) {
+      selectedRequest.value = requests.value.find((request) => request.id === selectedRequest.value.id) || null
+    }
   } catch (error) {
     console.error('Error fetching requests:', error)
     loadError.value = error.message || 'Could not load your requests.'
@@ -242,6 +251,8 @@ async function confirmCancelRequest() {
     cancellingRequest.value = false
   }
 }
+
+useStudentDataSync(fetchMyRequests, [{ table: 'service_requests' }])
 
 onMounted(() => {
   fetchMyRequests()
@@ -372,9 +383,9 @@ onMounted(() => {
               <span>Submitted</span>
               <strong>{{ formatDate(item.submitted_at || item.created_at) }}</strong>
             </div>
-            <div v-if="item.expected_completion_at || item.expected_at">
+            <div v-if="item.expected_completion">
               <span>Expected completion</span>
-              <strong>{{ formatDate(item.expected_completion_at || item.expected_at) }}</strong>
+              <strong>{{ formatDate(item.expected_completion) }}</strong>
             </div>
             <div>
               <span>Last updated</span>
@@ -383,6 +394,9 @@ onMounted(() => {
           </div>
           <p v-if="item.status === 'ready_for_pickup'" class="request-help">
             Your document is ready for pickup at the {{ item.office }}.
+          </p>
+          <p v-if="item.instructions" class="request-help">
+            <strong>Office instruction:</strong> {{ item.instructions }}
           </p>
           <div class="request-card-actions">
             <button class="request-outline" type="button" @click="selectedRequest = item">View Details</button>
@@ -430,6 +444,12 @@ onMounted(() => {
           <div><span>Submitted</span><strong>{{ formatDate(selectedRequest.submitted_at || selectedRequest.created_at) }}</strong></div>
         </div>
         <p class="request-detail-copy">{{ selectedRequest.details || 'No additional details were provided.' }}</p>
+        <p v-if="selectedRequest.instructions" class="request-detail-copy">
+          <strong>Office instruction:</strong> {{ selectedRequest.instructions }}
+        </p>
+        <p v-if="selectedRequest.expected_completion" class="request-detail-copy">
+          Expected completion: {{ formatDate(selectedRequest.expected_completion) }}
+        </p>
         <p v-if="selectedRequest.status === 'ready_for_pickup'" class="request-help">
           Your document is ready for pickup at the {{ selectedRequest.office }}.
         </p>

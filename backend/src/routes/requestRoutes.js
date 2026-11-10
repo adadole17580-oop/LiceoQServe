@@ -1,6 +1,7 @@
 import express from 'express'
 import { authenticateUser, requireRole } from '../middleware/auth.js'
 import { getAdminClient } from '../supabase.js'
+import { createStudentNotification } from '../utils/studentNotifications.js'
 
 const router = express.Router()
 
@@ -9,7 +10,7 @@ router.get('/my', authenticateUser, async (req, res) => {
     const adminClient = getAdminClient()
     const { data: requests, error } = await adminClient
       .from('service_requests')
-      .select('id, request_type, title, details, status, submitted_at, completed_at, updated_at, service_id, office_services(id, name, office_id, offices(id, name))')
+      .select('id, request_type, title, details, status, submitted_at, completed_at, updated_at, expected_completion, instructions, instructions_sent_at, service_id, office_services(id, name, office_id, offices(id, name))')
       .eq('student_id', req.user.id)
       .order('submitted_at', { ascending: false })
 
@@ -170,13 +171,16 @@ router.post('/update-status', authenticateUser, requireRole(['staff', 'admin']),
       error: `Valid requestId and status (${validStatuses.join(', ')}) required.`,
     })
   }
+  if (remarks !== undefined && (typeof remarks !== 'string' || remarks.trim().length > 2000)) {
+    return res.status(400).json({ error: 'The student update must be 2000 characters or fewer.' })
+  }
 
   try {
     const adminClient = getAdminClient()
 
     const { data: existingRequest, error: requestLookupError } = await adminClient
       .from('service_requests')
-      .select('id, office_services!inner(office_id)')
+      .select('id, student_id, title, status, updated_at, service_id, office_services!inner(name, office_id, offices(name))')
       .eq('id', requestId)
       .maybeSingle()
 
@@ -190,53 +194,60 @@ router.post('/update-status', authenticateUser, requireRole(['staff', 'admin']),
       return res.status(403).json({ error: 'You are not authorized to manage requests for this office.' })
     }
 
-    const now = new Date().toISOString()
-    const updateData = {
-      status,
-      handled_by: req.user.id,
-      updated_at: now,
+    let updated = existingRequest
+    let statusChanged = false
+    if (existingRequest.status !== status) {
+      const now = new Date().toISOString()
+      const updateData = {
+        status,
+        handled_by: req.user.id,
+        updated_at: now,
+      }
+
+      if (status === 'completed') {
+        updateData.completed_at = now
+      }
+
+      const { data, error: updateError } = await adminClient
+        .from('service_requests')
+        .update(updateData)
+        .eq('id', requestId)
+        .eq('status', existingRequest.status)
+        .select('id, student_id, title, status, updated_at, service_id, office_services(name, office_id, offices(name))')
+        .maybeSingle()
+
+      if (updateError) {
+        return res.status(500).json({ error: updateError.message })
+      }
+      if (!data) {
+        return res.status(409).json({ error: 'This request status changed. Refresh the list and try again.' })
+      }
+      updated = data
+      statusChanged = true
     }
 
-    if (status === 'completed') {
-      updateData.completed_at = now
-    }
+    const officeName = updated.office_services?.offices?.name || updated.office_services?.name || 'Campus Office'
+    const statusMessage = `Your request "${updated.title}" is now ${status.replaceAll('_', ' ')}.${remarks?.trim() ? ` ${remarks.trim()}` : ''}`
+    await createStudentNotification({
+      adminClient,
+      recipientId: updated.student_id,
+      title: `Request ${status.replaceAll('_', ' ')}`,
+      category: 'request',
+      message: statusMessage,
+      relatedId: updated.id,
+      eventKey: `request:${updated.id}:status:${status}:${updated.updated_at}`,
+      officeName,
+      transaction: updated.title,
+    })
 
-    const { data: updated, error: updateError } = await adminClient
-      .from('service_requests')
-      .update(updateData)
-      .eq('id', requestId)
-      .select('id, student_id, title, status, service_id, office_services(name, offices(name))')
-      .single()
-
-    if (updateError) {
-      return res.status(500).json({ error: updateError.message })
-    }
-
-    const notificationMessages = {
-      processing: `Your request for "${updated.title}" is now being processed.`,
-      ready_for_pickup: `Your document "${updated.title}" is ready for pickup at the ${updated.office_services?.offices?.name || 'office'}.`,
-      completed: `Your request for "${updated.title}" has been marked as completed.`,
-      cancelled: `Your request for "${updated.title}" was cancelled. ${remarks || ''}`.trim(),
-    }
-
-    if (notificationMessages[status]) {
-      await adminClient.from('notifications').insert({
-        recipient_id: updated.student_id,
-        title: `Request ${status.replaceAll('_', ' ')}`,
-        category: 'request',
-        message: notificationMessages[status],
-        is_read: false,
-      })
-    }
-
-    if (status === 'completed') {
+    if (status === 'completed' && statusChanged) {
       await adminClient.from('service_history').insert({
         student_id: updated.student_id,
         service_id: updated.service_id,
         transaction_id: updated.id,
         transaction_type: 'Request',
         title: `${updated.office_services?.offices?.name || 'Campus'} Request: ${updated.title}`,
-        completed_at: now,
+        completed_at: updated.updated_at,
       })
     }
 
@@ -244,6 +255,69 @@ router.post('/update-status', authenticateUser, requireRole(['staff', 'admin']),
   } catch (err) {
     console.error('Error updating request status:', err)
     res.status(500).json({ error: 'Internal server error.' })
+  }
+})
+
+router.post('/instruction', authenticateUser, requireRole(['staff', 'admin']), async (req, res) => {
+  const { requestId, instruction } = req.body || {}
+  const message = typeof instruction === 'string' ? instruction.trim() : ''
+
+  if (!requestId || !message || message.length > 2000) {
+    return res.status(400).json({ error: 'A request ID and an instruction of 1–2000 characters are required.' })
+  }
+
+  try {
+    const adminClient = getAdminClient()
+    const { data: request, error: lookupError } = await adminClient
+      .from('service_requests')
+      .select('id, student_id, title, instructions, instructions_sent_at, updated_at, office_services!inner(name, office_id, offices(name))')
+      .eq('id', requestId)
+      .maybeSingle()
+
+    if (lookupError) return res.status(500).json({ error: lookupError.message })
+    if (!request) return res.status(404).json({ error: 'Request not found.' })
+    if (req.profile.role !== 'admin' && request.office_services.office_id !== req.profile.office_id) {
+      return res.status(403).json({ error: 'You are not authorized to update requests for this office.' })
+    }
+
+    let updated = request
+    if (request.instructions !== message || !request.instructions_sent_at) {
+      const sentAt = new Date().toISOString()
+      const { data, error: updateError } = await adminClient
+        .from('service_requests')
+        .update({
+          instructions: message,
+          instructions_sent_at: sentAt,
+          handled_by: req.user.id,
+          updated_at: sentAt,
+        })
+        .eq('id', request.id)
+        .eq('updated_at', request.updated_at)
+        .select('id, student_id, title, instructions, instructions_sent_at, updated_at, office_services(name, office_id, offices(name))')
+        .maybeSingle()
+
+      if (updateError) return res.status(500).json({ error: updateError.message })
+      if (!data) return res.status(409).json({ error: 'This request changed. Refresh the list and try again.' })
+      updated = data
+    }
+
+    const officeName = updated.office_services?.offices?.name || updated.office_services?.name || 'Campus Office'
+    await createStudentNotification({
+      adminClient,
+      recipientId: updated.student_id,
+      title: 'New request instruction',
+      category: 'request',
+      message: `${officeName} added an instruction for "${updated.title}": ${message}`,
+      relatedId: updated.id,
+      eventKey: `request:${updated.id}:instruction:${updated.instructions_sent_at}`,
+      officeName,
+      transaction: updated.title,
+    })
+
+    return res.json({ message: 'The instruction was sent to the student.', request: updated })
+  } catch (err) {
+    console.error('Error sending a request instruction:', err)
+    return res.status(500).json({ error: 'Internal server error.' })
   }
 })
 

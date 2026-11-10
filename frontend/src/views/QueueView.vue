@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from "vue";
 import { supabase } from "../lib/supabase.js";
+import { useStudentDataSync } from "../composables/useStudentDataSync.js";
 import "../assets/styles/queue.css";
 
 const selectedOffice = ref("Registrar");
@@ -116,6 +117,7 @@ async function fetchActiveTicket() {
     setActiveTicket(ticket)
   } catch (err) {
     console.error('Error fetching active queue ticket:', err)
+    errorMessage.value = err.message || 'Could not refresh the active queue ticket.'
   } finally {
     activeTicketRefreshInProgress = false
   }
@@ -252,6 +254,8 @@ async function confirmCancelQueue() {
     if (!errorMessage.value) showCancelDialog.value = false;
   }
 }
+
+useStudentDataSync(fetchActiveTicket)
 
 onMounted(() => {
   loadQueueServices()

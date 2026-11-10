@@ -106,6 +106,13 @@
   line-height: 1.4;
 }
 
+.notification-office {
+  margin: -5px 0 7px;
+  color: #76585a;
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .queue-arrow {
   margin: 0 10px;
   font-size: 20px;
@@ -126,6 +133,11 @@
 .open-notification-button:hover,
 .mark-all-button:not(:disabled):hover {
   text-decoration: underline;
+}
+
+.open-notification-button:disabled {
+  opacity: 0.55;
+  cursor: wait;
 }
 
 .empty-notifications {
@@ -173,6 +185,10 @@
 
   .notification-detail {
     font-size: 13px;
+  }
+
+  .notification-office {
+    font-size: 12px;
   }
 
   .open-notification-button {

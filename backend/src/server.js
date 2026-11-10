@@ -9,6 +9,7 @@ import appointmentRoutes from './routes/appointmentRoutes.js'
 import requestRoutes from './routes/requestRoutes.js'
 import staffRoutes from './routes/staffRoutes.js'
 import authRoutes from './routes/authRoutes.js'
+import { startGeneralPostEmailDelivery } from './utils/generalPostEmailDelivery.js'
 
 const app = express()
 const port = process.env.PORT || 3000
@@ -38,6 +39,8 @@ app.use('/api/library', libraryRoutes)
 app.use('/api/appointments', appointmentRoutes)
 app.use('/api/requests', requestRoutes)
 app.use('/api/staff', staffRoutes)
+
+startGeneralPostEmailDelivery()
 
 app.listen(port, () => {
   console.log(`LiceoQServe API running at http://localhost:${port}`)

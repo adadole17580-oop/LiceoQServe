@@ -1,7 +1,32 @@
 <script setup>
+import { onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { supabase } from '../lib/supabase.js'
 
 const router = useRouter()
+const unreadCount = ref(0)
+let notificationChannel = null
+
+async function loadUnreadCount() {
+  try {
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+    if (sessionError) throw sessionError
+    if (!session?.user) {
+      unreadCount.value = 0
+      return
+    }
+
+    const { count, error } = await supabase
+      .from('notifications')
+      .select('id', { count: 'exact', head: true })
+      .eq('recipient_id', session.user.id)
+      .eq('is_read', false)
+    if (error) throw error
+    unreadCount.value = count || 0
+  } catch (error) {
+    console.error('Error loading unread notification count:', error)
+  }
+}
 
 function goToNotifications() {
   router.push('/student/notifications')
@@ -10,6 +35,47 @@ function goToNotifications() {
 function goToProfile() {
   router.push('/student/profile')
 }
+
+function refreshUnreadCountWhenVisible() {
+  if (document.visibilityState === 'visible') {
+    void loadUnreadCount()
+  }
+}
+
+onMounted(async () => {
+  await loadUnreadCount()
+  const { data: { session }, error } = await supabase.auth.getSession()
+  if (error) {
+    console.error('Could not subscribe to unread notifications:', error)
+    return
+  }
+  if (session?.user) {
+    notificationChannel = supabase
+      .channel(`header-notifications-${session.user.id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'notifications',
+        filter: `recipient_id=eq.${session.user.id}`,
+      }, loadUnreadCount)
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn('Unread notification count will refresh when the portal regains focus.')
+        }
+      })
+  }
+
+  window.addEventListener('focus', refreshUnreadCountWhenVisible)
+  document.addEventListener('visibilitychange', refreshUnreadCountWhenVisible)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('focus', refreshUnreadCountWhenVisible)
+  document.removeEventListener('visibilitychange', refreshUnreadCountWhenVisible)
+  if (notificationChannel) {
+    void supabase.removeChannel(notificationChannel)
+  }
+})
 </script>
 
 <template>
@@ -24,8 +90,9 @@ function goToProfile() {
 
     <div class="header-actions">
       <button
-        aria-label="Notifications"
+        :aria-label="unreadCount ? `Notifications, ${unreadCount} unread` : 'Notifications'"
         title="Notifications"
+        style="position: relative;"
         @click="goToNotifications"
       >
         <svg
@@ -44,6 +111,14 @@ function goToProfile() {
             stroke-linecap="round"
           />
         </svg>
+        <span
+          v-if="unreadCount"
+          class="notification-badge"
+          aria-hidden="true"
+          style="position: absolute; top: -4px; right: -4px; min-width: 17px; height: 17px; padding: 0 4px; display: grid; place-items: center; border-radius: 999px; background: #d32f2f; color: #fff; font-size: 10px; font-weight: 700;"
+        >
+          {{ unreadCount > 99 ? '99+' : unreadCount }}
+        </span>
       </button>
 
       <button

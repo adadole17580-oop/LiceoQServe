@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
+import { useStudentDataSync } from '../composables/useStudentDataSync.js'
 import '../assets/styles/appointments.css'
 
 const route = useRoute()
@@ -191,6 +192,12 @@ async function loadData() {
     appointments.value = (appointmentData.appointments || []).map(mapAppointment)
     reservations.value = (reservationData.reservations || []).map(mapReservation)
     rooms.value = roomData.rooms || []
+    const recordId = typeof route.query.record === 'string' ? route.query.record : ''
+    if (recordId) {
+      selectedBooking.value = bookingRecords.value.find((booking) => booking.id === recordId) || null
+    } else if (selectedBooking.value) {
+      selectedBooking.value = bookingRecords.value.find((booking) => booking.id === selectedBooking.value.id) || null
+    }
   } catch (error) {
     console.error('Error loading appointments and reservations:', error)
     loadError.value = error.message || 'Could not load your bookings.'
@@ -476,6 +483,18 @@ async function submitBorrowingRequest() {
     submitting.value = false
   }
 }
+
+useStudentDataSync(async () => {
+  try {
+    await Promise.all([fetchServices(), loadData()])
+  } catch (error) {
+    console.error('Error refreshing appointment data:', error)
+    loadError.value = error.message || 'Could not refresh your bookings.'
+  }
+}, [
+  { table: 'appointments' },
+  { table: 'reservations' },
+])
 
 onMounted(async () => {
   const savedTab = sessionStorage.getItem('libraryTab')
