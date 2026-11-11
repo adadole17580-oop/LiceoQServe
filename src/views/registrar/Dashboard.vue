@@ -1,6 +1,7 @@
 
 <template>
   <section class="dashboard-page">
+
     <!-- Dashboard heading banner -->
     <header class="dashboard-banner">
       <p class="banner-date">{{ currentDate }}</p>
@@ -23,10 +24,7 @@
       <article class="stat-card">
         <p class="stat-label">TODAY’S APPOINTMENT</p>
         <h2>{{ appointmentCount }}</h2>
-        <button
-          class="details-link"
-          @click="goTo('/registrar/appointments')"
-        >
+        <button class="details-link" @click="goTo('/registrar/appointments')">
           View details
         </button>
       </article>
@@ -50,6 +48,7 @@
 
     <!-- Lower dashboard panels -->
     <section class="dashboard-panels">
+
       <!-- Appointment panel -->
       <article class="content-panel appointment-panel">
         <h2>Registrar Dashboard</h2>
@@ -59,17 +58,16 @@
         </div>
 
         <div v-else-if="appointment" class="appointment-row">
-          <span class="appointment-time">{{ appointment.time }}</span>
+          <span class="appointment-time">
+            {{ appointment.time }}
+          </span>
 
           <div class="appointment-information">
             <p class="person-name">{{ appointment.name }}</p>
             <p class="secondary-text">{{ appointment.service }}</p>
           </div>
 
-          <span
-            class="status-pill"
-            :class="statusClass(appointment.status)"
-          >
+          <span class="status-pill" :class="statusClass(appointment.status)">
             {{ formatStatus(appointment.status) }}
           </span>
         </div>
@@ -101,10 +99,7 @@
               <p class="secondary-text">{{ request.id }}</p>
             </div>
 
-            <span
-              class="status-pill"
-              :class="statusClass(request.status)"
-            >
+            <span class="status-pill" :class="statusClass(request.status)">
               {{ formatStatus(request.status) }}
             </span>
           </div>
@@ -114,6 +109,7 @@
           </div>
         </template>
       </article>
+
     </section>
   </section>
 </template>
@@ -125,12 +121,15 @@ import { supabase } from '../../lib/supabase'
 
 const router = useRouter()
 
+// Registrar office ID
+const REGISTRAR_OFFICE_ID =
+  '00409abc-cb88-480e-bdc0-5b94ac322ae7'
+
+// Dashboard values
 const loading = ref(true)
 
 const waitingCount = ref(0)
 const appointmentCount = ref(0)
-
-// These remain zero until a document-request table is available.
 const pendingRequestCount = ref(0)
 const readyForPickupCount = ref(0)
 
@@ -146,7 +145,7 @@ const currentDate = ref(
   })
 )
 
-// Get today's date boundaries using the user's local timezone.
+// Get today's date boundaries
 function getTodayBounds() {
   const now = new Date()
 
@@ -168,6 +167,7 @@ function getTodayBounds() {
   }
 }
 
+// Format appointment time
 function formatTime(dateString) {
   return new Date(dateString).toLocaleTimeString('en-US', {
     hour: 'numeric',
@@ -175,6 +175,7 @@ function formatTime(dateString) {
   })
 }
 
+// Format request status
 function formatStatus(status) {
   if (!status) return 'Unknown'
 
@@ -183,6 +184,7 @@ function formatStatus(status) {
     .replace(/\b\w/g, letter => letter.toUpperCase())
 }
 
+// Status styling
 function statusClass(status) {
   const normalized = (status || '').toLowerCase()
 
@@ -204,6 +206,7 @@ function statusClass(status) {
   return 'default-status'
 }
 
+// Navigation
 function goTo(path) {
   router.push(path)
 }
@@ -212,9 +215,10 @@ function openRequests() {
   router.push('/registrar/requests')
 }
 
-// Fetch today's waiting queue count.
+// Fetch waiting queue count
 async function fetchWaitingCount() {
   const today = new Date()
+
   const queueDate = [
     today.getFullYear(),
     String(today.getMonth() + 1).padStart(2, '0'),
@@ -232,10 +236,45 @@ async function fetchWaitingCount() {
     return
   }
 
-  waitingCount.value = count || 0
+  waitingCount.value = count ?? 0
 }
 
-// Fetch today's appointments.
+// Fetch only Registrar pending requests
+async function fetchPendingRequestCount() {
+  const { data, error } = await supabase
+    .from('service_requests')
+    .select(`
+      id,
+      status,
+      service_id,
+      office_services!inner (
+        office_id
+      )
+    `)
+    .eq('status', 'pending')
+    .eq(
+      'office_services.office_id',
+      REGISTRAR_OFFICE_ID
+    )
+
+  if (error) {
+    console.error(
+      'Error loading Registrar pending requests:',
+      error
+    )
+    return
+  }
+
+  pendingRequestCount.value = data?.length ?? 0
+
+  console.log('Registrar pending requests:', data)
+  console.log(
+    'Registrar pending count:',
+    pendingRequestCount.value
+  )
+}
+
+// Fetch today's appointments
 async function fetchAppointments() {
   const { start, end } = getTodayBounds()
 
@@ -259,20 +298,19 @@ async function fetchAppointments() {
     return
   }
 
-  appointmentCount.value = data?.length || 0
+  appointmentCount.value = data?.length ?? 0
 
   if (!data || data.length === 0) {
     appointment.value = null
     return
   }
 
-  // Display the earliest appointment scheduled for today.
   const firstAppointment = data[0]
 
   let studentName = 'Unknown Student'
   let serviceName = firstAppointment.purpose || 'Appointment'
 
-  // Get student name from profiles.
+  // Get student name
   if (firstAppointment.student_id) {
     const { data: student, error: studentError } = await supabase
       .from('profiles')
@@ -281,13 +319,16 @@ async function fetchAppointments() {
       .maybeSingle()
 
     if (studentError) {
-      console.error('Error loading appointment student:', studentError)
+      console.error(
+        'Error loading appointment student:',
+        studentError
+      )
     } else if (student?.full_name) {
       studentName = student.full_name
     }
   }
 
-  // Get service name from office_services.
+  // Get service name
   if (firstAppointment.service_id) {
     const { data: service, error: serviceError } = await supabase
       .from('office_services')
@@ -296,7 +337,10 @@ async function fetchAppointments() {
       .maybeSingle()
 
     if (serviceError) {
-      console.error('Error loading appointment service:', serviceError)
+      console.error(
+        'Error loading appointment service:',
+        serviceError
+      )
     } else if (service?.name) {
       serviceName = service.name
     }
@@ -310,7 +354,7 @@ async function fetchAppointments() {
   }
 }
 
-// Load dashboard information.
+// Load dashboard
 async function loadDashboard() {
   loading.value = true
 
@@ -318,6 +362,7 @@ async function loadDashboard() {
     await Promise.all([
       fetchWaitingCount(),
       fetchAppointments(),
+      fetchPendingRequestCount(),
     ])
   } catch (error) {
     console.error('Dashboard loading error:', error)
@@ -326,6 +371,7 @@ async function loadDashboard() {
   }
 }
 
+// Initialize dashboard
 onMounted(() => {
   loadDashboard()
 })
@@ -338,7 +384,6 @@ onMounted(() => {
   font-family: Arial, Helvetica, sans-serif;
 }
 
-/* Main banner */
 .dashboard-banner {
   min-height: 178px;
   padding: 36px 32px;
@@ -371,7 +416,6 @@ onMounted(() => {
   color: #fff4f1;
 }
 
-/* Statistic cards */
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -422,7 +466,6 @@ onMounted(() => {
   text-decoration: underline;
 }
 
-/* Lower panels */
 .dashboard-panels {
   display: grid;
   grid-template-columns: 1.15fr 1fr;
@@ -452,7 +495,7 @@ onMounted(() => {
 
 .appointment-row {
   min-height: 66px;
-  padding: 14px 14px;
+  padding: 14px;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -503,7 +546,6 @@ onMounted(() => {
   white-space: normal;
 }
 
-.confirmed,
 .ready {
   background: #b9e2c8;
   color: #426c50;
@@ -519,10 +561,9 @@ onMounted(() => {
   color: #63474a;
 }
 
-/* Recent work rows */
 .recent-work-row {
   min-height: 66px;
-  padding: 14px 14px;
+  padding: 14px;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -541,7 +582,6 @@ onMounted(() => {
   font-size: 14px;
 }
 
-/* Responsive layouts */
 @media (max-width: 1100px) {
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
