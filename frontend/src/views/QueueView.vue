@@ -8,6 +8,7 @@ const selectedOffice = ref("Registrar");
 const selectedServiceId = ref("");
 const availableServices = ref([]);
 const servicesLoading = ref(false);
+const cashierAvailable = ref(false);
 
 const activeTicket = ref(null);
 const showCancelDialog = ref(false);
@@ -18,6 +19,8 @@ const loading = ref(false);
 let realtimeChannel = null;
 let activeTicketRefreshTimer = null
 let activeTicketRefreshInProgress = false
+let cashierAvailabilityRefreshTimer = null
+let cashierAvailabilityRefreshInProgress = false
 
 const officeServices = computed(() => availableServices.value.filter((service) => (
   service.offices?.name === selectedOffice.value &&
@@ -90,6 +93,34 @@ async function loadQueueServices() {
     errorMessage.value = "Could not load available queue services. Please try again.";
   } finally {
     servicesLoading.value = false;
+  }
+}
+
+async function refreshCashierAvailability() {
+  if (cashierAvailabilityRefreshInProgress) return
+  cashierAvailabilityRefreshInProgress = true
+
+  try {
+    const { data: { session } } = await supabase.auth.getSession()
+    const token = session?.access_token
+    if (!token) {
+      cashierAvailable.value = false
+      return
+    }
+
+    const response = await fetch(
+      `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/queue/cashier-availability`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const result = await response.json()
+    if (!response.ok) throw new Error(result.error || 'Could not check Cashier queue availability.')
+
+    cashierAvailable.value = result.available === true
+  } catch (err) {
+    console.error('Error checking Cashier queue availability:', err)
+    cashierAvailable.value = false
+  } finally {
+    cashierAvailabilityRefreshInProgress = false
   }
 }
 
@@ -260,12 +291,17 @@ useStudentDataSync(fetchActiveTicket)
 onMounted(() => {
   loadQueueServices()
   fetchActiveTicket()
+  refreshCashierAvailability()
   activeTicketRefreshTimer = window.setInterval(fetchActiveTicket, 5000)
+  cashierAvailabilityRefreshTimer = window.setInterval(refreshCashierAvailability, 5000)
 })
 
 onUnmounted(() => {
   if (activeTicketRefreshTimer) {
     window.clearInterval(activeTicketRefreshTimer)
+  }
+  if (cashierAvailabilityRefreshTimer) {
+    window.clearInterval(cashierAvailabilityRefreshTimer)
   }
   if (realtimeChannel) {
     supabase.removeChannel(realtimeChannel)
@@ -330,11 +366,14 @@ onUnmounted(() => {
       <p v-if="!servicesLoading && !officeServices.length" class="queue-hint">
         No active {{ selectedOffice }} queue services are currently available.
       </p>
+      <p v-if="selectedOffice === 'Cashier' && !cashierAvailable" class="queue-hint">
+        Cashier queueing is currently unavailable.
+      </p>
 
       <button
         class="queue-primary-button"
         type="button"
-        :disabled="loading || servicesLoading || !selectedService"
+        :disabled="loading || servicesLoading || !selectedService || (selectedOffice === 'Cashier' && !cashierAvailable)"
         @click="requestQueue"
       >
         {{ loading ? 'Generating Ticket...' : 'Get Queue Number' }}

@@ -20,6 +20,48 @@ async function getServiceAndOffice(serviceId) {
   return service
 }
 
+async function getCashierQueueAvailability(adminClient) {
+  try {
+    const { data: cashierOffice, error: officeError } = await adminClient
+      .from('offices')
+      .select('id')
+      .eq('name', 'Cashier')
+      .maybeSingle()
+
+    if (officeError || !cashierOffice) {
+      if (officeError) console.error('Could not find the Cashier office:', officeError)
+      return false
+    }
+
+    const { data: counters, error: counterError } = await adminClient
+      .from('cashier_counters')
+      .select('is_open, is_suspended')
+      .eq('office_id', cashierOffice.id)
+
+    if (counterError) {
+      console.error('Could not load Cashier counter availability:', counterError)
+      return false
+    }
+
+    return (counters || []).some((counter) => (
+      counter.is_open === true && counter.is_suspended === false
+    ))
+  } catch (error) {
+    console.error('Could not check Cashier queue availability:', error)
+    return false
+  }
+}
+
+router.get('/cashier-availability', authenticateUser, requireRole(['student']), async (_req, res) => {
+  try {
+    const available = await getCashierQueueAvailability(getAdminClient())
+    res.json({ available })
+  } catch (err) {
+    console.error('Error checking Cashier queue availability:', err)
+    res.status(500).json({ error: 'Could not check Cashier queue availability.' })
+  }
+})
+
 router.get('/active', authenticateUser, async (req, res) => {
   try {
     const adminClient = getAdminClient()
@@ -102,6 +144,13 @@ router.post('/join', authenticateUser, async (req, res) => {
           service: existingTicket.office_services?.name || service.name,
         },
       })
+    }
+
+    if (officeName === 'Cashier') {
+      const cashierAvailable = await getCashierQueueAvailability(adminClient)
+      if (!cashierAvailable) {
+        return res.status(409).json({ error: 'Cashier queueing is currently unavailable.' })
+      }
     }
 
     const today = new Date().toISOString().slice(0, 10)
