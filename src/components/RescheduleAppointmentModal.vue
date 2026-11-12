@@ -15,10 +15,19 @@ const emit = defineEmits(['close', 'review'])
 const newDate = ref('')
 const newTime = ref('')
 
+function getLocalDate() {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+
+  return `${year}-${month}-${day}`
+}
+
 watch(
-  () => [props.show, props.appointment?.id],
-  () => {
-    if (props.show) {
+  () => [props.show, props.appointment?.appointmentId],
+  ([isOpen]) => {
+    if (isOpen) {
       newDate.value = ''
       newTime.value = ''
     }
@@ -31,7 +40,7 @@ function reviewChanges() {
     return
   }
 
-  if (newDate.value < new Date().toLocaleDateString('en-CA')) {
+  if (newDate.value < getLocalDate()) {
     window.alert('Please select a future date.')
     return
   }
@@ -68,7 +77,7 @@ function reviewChanges() {
           id="new-date"
           v-model="newDate"
           type="date"
-          :min="new Date().toLocaleDateString('en-CA')"
+          :min="getLocalDate()"
           required
         />
 

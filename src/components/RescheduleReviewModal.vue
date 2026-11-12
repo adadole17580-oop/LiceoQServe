@@ -64,11 +64,11 @@ function formatDate(dateString) {
       </div>
 
       <div class="actions">
-        <button class="back" @click="emit('close')">
+        <button type="button" class="back" @click="emit('close')">
           Go Back
         </button>
 
-        <button class="confirm" @click="emit('confirm')">
+        <button type="button" class="confirm" @click="emit('confirm')">
           Confirm Changes
         </button>
       </div>

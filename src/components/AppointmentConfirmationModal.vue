@@ -1,7 +1,11 @@
 
 <script setup>
-defineProps({
+const props = defineProps({
   show: Boolean,
+  processing: {
+    type: Boolean,
+    default: false,
+  },
   action: {
     type: String,
     default: 'complete',
@@ -15,6 +19,11 @@ defineProps({
 const emit = defineEmits(['close', 'confirm'])
 
 const details = {
+  confirm: {
+    title: 'Approve this Appointment?',
+    button: 'Approve Appointment',
+    color: '#16803c',
+  },
   complete: {
     title: 'Complete this Appointment?',
     button: 'Confirm completed',
@@ -31,13 +40,18 @@ const details = {
     color: '#d00000',
   },
 }
+
+function closeModal() {
+  if (props.processing) return
+  emit('close')
+}
 </script>
 
 <template>
   <div
     v-if="show"
     class="modal-overlay"
-    @click.self="emit('close')"
+    @click.self="closeModal"
   >
     <section
       class="modal"
@@ -56,16 +70,24 @@ const details = {
       </p>
 
       <div class="buttons">
-        <button class="back" @click="emit('close')">
+        <button
+          class="back"
+          type="button"
+          :disabled="processing"
+          @click="closeModal"
+        >
           Go Back
         </button>
 
         <button
           class="confirm"
+          type="button"
+          :disabled="processing"
           :style="{ background: details[action]?.color }"
           @click="emit('confirm', action)"
         >
-          {{ details[action]?.button }}
+          <span v-if="processing" class="spinner"></span>
+          {{ processing ? 'Processing...' : details[action]?.button }}
         </button>
       </div>
     </section>
@@ -141,8 +163,32 @@ h2 {
 }
 
 .buttons .confirm {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
   border-color: transparent;
   color: white;
+}
+
+.buttons button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgb(255 255 255 / 40%);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 480px) {

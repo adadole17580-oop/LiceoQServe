@@ -6,28 +6,59 @@ import { supabase } from '../lib/Supabase.js'
 const LIBRARY_SERVICE_ID = '99a740ad-96d7-43a5-9bcc-3f9723cabd28'
 
 const activeTab = ref('Borrow Requests')
-const searchBook = ref('')
-const selectedRequest = ref(null)
-const selectedLoan = ref(null)
-const confirmationAction = ref('')
-const showConfirmation = ref(false)
 
 const books = ref([])
 const requests = ref([])
 const borrowedBooks = ref([])
 
+const searchBook = ref('')
+
 const loadingBooks = ref(false)
 const loadingRequests = ref(false)
 const loadingLoans = ref(false)
 const processing = ref(false)
+const savingBook = ref(false)
 
 const booksError = ref('')
 const requestsError = ref('')
 const loansError = ref('')
-const actionMessage = ref('')
 const actionError = ref('')
+const actionMessage = ref('')
+const newBookError = ref('')
+
+const showAddBookModal = ref(false)
+const showConfirmation = ref(false)
+
+const selectedRequest = ref(null)
+const selectedLoan = ref(null)
+const confirmationAction = ref('')
+
+const newBook = ref({
+  isbn: '',
+  title: '',
+  author: '',
+  category: '',
+  shelf_location: '',
+  total_copies: 1,
+})
 
 let subscriptions = []
+
+// ========================================
+// COMPUTED DATA
+// ========================================
+
+const pendingRequests = computed(() =>
+  requests.value.filter(request =>
+    String(request.status || '').toLowerCase() === 'pending'
+  )
+)
+
+const otherRequests = computed(() =>
+  requests.value.filter(request =>
+    String(request.status || '').toLowerCase() !== 'pending'
+  )
+)
 
 const filteredBooks = computed(() => {
   const keyword = searchBook.value.trim().toLowerCase()
@@ -42,376 +73,38 @@ const filteredBooks = computed(() => {
       book.category,
       book.shelf_location,
     ].some(value =>
-      String(value || '').toLowerCase().includes(keyword),
-    ),
+      String(value || '').toLowerCase().includes(keyword)
+    )
   )
 })
 
-function getAvailability(book) {
-  return Number(book.available_copies) > 0
-    ? 'Available'
-    : 'Unavailable'
-}
-
-function formatDate(value) {
-  if (!value) return 'Not available'
-
-  return new Date(value).toLocaleString('en-PH', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
-}
-
-function formatDateOnly(value) {
-  if (!value) return 'Not available'
-
-  return new Date(value).toLocaleDateString('en-PH', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  })
-}
-
-function getStudentName(profile) {
-  return profile?.full_name || 'Unknown student'
-}
-
-async function fetchBooks() {
-  loadingBooks.value = true
-  booksError.value = ''
-
-  const { data, error } = await supabase
-    .from('library_books')
-    .select(`
-      id,
-      isbn,
-      title,
-      author,
-      category,
-      shelf_location,
-      total_copies,
-      available_copies,
-      is_active
-    `)
-    .eq('is_active', true)
-    .order('title', { ascending: true })
-
-  if (error) {
-    booksError.value = error.message
-    console.error('Error fetching books:', error)
-  } else {
-    books.value = data || []
-  }
-
-  loadingBooks.value = false
-}
-
-async function fetchRequests() {
-  loadingRequests.value = true
-  requestsError.value = ''
-
-  const { data, error } = await supabase
-    .from('service_requests')
-    .select(`
-      id,
-      student_id,
-      book_id,
-      title,
-      details,
-      request_type,
-      status,
-      staff_notes,
-      submitted_at
-    `)
-    .eq('service_id', LIBRARY_SERVICE_ID)
-    .order('submitted_at', { ascending: false })
-
-  if (error) {
-    requestsError.value = error.message
-    console.error('Error fetching borrow requests:', error)
-    loadingRequests.value = false
-    return
-  }
-
-  const rows = data || []
-
-  const studentIds = [
-    ...new Set(rows.map(item => item.student_id).filter(Boolean)),
-  ]
-
-  const bookIds = [
-    ...new Set(rows.map(item => item.book_id).filter(Boolean)),
-  ]
-
-  let profiles = []
-  let selectedBooks = []
-
-  if (studentIds.length) {
-    const result = await supabase
-      .from('profiles')
-      .select('id, student_id, full_name, university_email, program, year_level')
-      .in('id', studentIds)
-
-    if (result.error) {
-      requestsError.value = result.error.message
-      loadingRequests.value = false
-      return
-    }
-
-    profiles = result.data || []
-  }
-
-  if (bookIds.length) {
-    const result = await supabase
-      .from('library_books')
-      .select('id, title, author, isbn, category, available_copies')
-      .in('id', bookIds)
-
-    if (result.error) {
-      requestsError.value = result.error.message
-      loadingRequests.value = false
-      return
-    }
-
-    selectedBooks = result.data || []
-  }
-
-  requests.value = rows.map(request => ({
-    ...request,
-    student: profiles.find(
-      profile => profile.id === request.student_id,
-    ) || null,
-    book: selectedBooks.find(
-      book => book.id === request.book_id,
-    ) || null,
-  }))
-
-  loadingRequests.value = false
-}
-
-async function fetchBorrowedBooks() {
-  loadingLoans.value = true
-  loansError.value = ''
-
-  const { data, error } = await supabase
-    .from('book_loans')
-    .select(`
-      id,
-      book_id,
-      student_id,
-      borrowed_at,
-      due_at,
-      returned_at,
-      status,
-      source_request_id
-    `)
-    .order('borrowed_at', { ascending: false })
-
-  if (error) {
-    loansError.value = error.message
-    console.error('Error fetching book loans:', error)
-    loadingLoans.value = false
-    return
-  }
-
-  const rows = data || []
-
-  const studentIds = [
-    ...new Set(rows.map(item => item.student_id).filter(Boolean)),
-  ]
-
-  const bookIds = [
-    ...new Set(rows.map(item => item.book_id).filter(Boolean)),
-  ]
-
-  let profiles = []
-  let selectedBooks = []
-
-  if (studentIds.length) {
-    const result = await supabase
-      .from('profiles')
-      .select('id, student_id, full_name')
-      .in('id', studentIds)
-
-    if (result.error) {
-      loansError.value = result.error.message
-      loadingLoans.value = false
-      return
-    }
-
-    profiles = result.data || []
-  }
-
-  if (bookIds.length) {
-    const result = await supabase
-      .from('library_books')
-      .select('id, title, author')
-      .in('id', bookIds)
-
-    if (result.error) {
-      loansError.value = result.error.message
-      loadingLoans.value = false
-      return
-    }
-
-    selectedBooks = result.data || []
-  }
-
-  borrowedBooks.value = rows.map(loan => ({
-    ...loan,
-    student: profiles.find(
-      profile => profile.id === loan.student_id,
-    ) || null,
-    book: selectedBooks.find(
-      book => book.id === loan.book_id,
-    ) || null,
-  }))
-
-  loadingLoans.value = false
-}
-
-async function refreshAll() {
-  await Promise.all([
-    fetchBooks(),
-    fetchRequests(),
-    fetchBorrowedBooks(),
-  ])
-}
-
-function openConfirmation(request, action) {
-  selectedRequest.value = request
-  selectedLoan.value = null
-  confirmationAction.value = action
-  actionMessage.value = ''
-  actionError.value = ''
-  showConfirmation.value = true
-}
-
-function openReturnConfirmation(loan) {
-  selectedLoan.value = loan
-  selectedRequest.value = null
-  confirmationAction.value = 'Return'
-  actionMessage.value = ''
-  actionError.value = ''
-  showConfirmation.value = true
-}
-
-async function confirmRequest() {
-  if (processing.value) return
-
-  processing.value = true
-  actionError.value = ''
-  actionMessage.value = ''
-
-  try {
-    if (confirmationAction.value === 'Approve') {
-      if (!selectedRequest.value) return
-
-      if (!selectedRequest.value.book_id) {
-        throw new Error(
-          'This request has no selected book. The student must submit a request with a book selection.',
-        )
-      }
-
-      const { error } = await supabase.rpc(
-        'approve_library_borrow_request',
-        {
-          p_request_id: selectedRequest.value.id,
-        },
-      )
-
-      if (error) throw error
-
-      actionMessage.value = 'Borrow request approved successfully.'
-    }
-
-    if (confirmationAction.value === 'Reject') {
-      if (!selectedRequest.value) return
-
-      const { data: userData, error: userError } =
-        await supabase.auth.getUser()
-
-      if (userError) throw userError
-
-      const { data: updatedRequest, error } = await supabase
-        .from('service_requests')
-        .update({
-          status: 'rejected',
-          handled_by: userData.user.id,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', selectedRequest.value.id)
-        .eq('service_id', LIBRARY_SERVICE_ID)
-        .eq('status', 'pending')
-        .select('id')
-        .maybeSingle()
-
-      if (error) throw error
-
-      if (!updatedRequest) {
-        throw new Error(
-          'The request is no longer pending or you do not have permission to update it.',
-        )
-      }
-
-      actionMessage.value = 'Borrow request rejected successfully.'
-    }
-
-    if (confirmationAction.value === 'Return') {
-      if (!selectedLoan.value) return
-
-      const { error } = await supabase.rpc(
-        'return_library_book',
-        {
-          p_loan_id: selectedLoan.value.id,
-        },
-      )
-
-      if (error) throw error
-
-      actionMessage.value = 'Book returned successfully.'
-    }
-
-    showConfirmation.value = false
-    selectedRequest.value = null
-    selectedLoan.value = null
-
-    await refreshAll()
-  } catch (error) {
-    console.error('Library transaction error:', error)
-    actionError.value = error.message || 'Something went wrong.'
-  } finally {
-    processing.value = false
-  }
-}
-
-function closeConfirmation() {
-  if (processing.value) return
-
-  showConfirmation.value = false
-  selectedRequest.value = null
-  selectedLoan.value = null
-  actionError.value = ''
-}
+const activeLoans = computed(() =>
+  borrowedBooks.value.filter(loan =>
+    String(loan.status || '').toLowerCase() === 'borrowed'
+  )
+)
+
+const returnedLoans = computed(() =>
+  borrowedBooks.value.filter(loan =>
+    String(loan.status || '').toLowerCase() === 'returned'
+  )
+)
 
 const confirmationTitle = computed(() => {
   if (confirmationAction.value === 'Approve') {
-    return 'Approve borrow request?'
+    return 'Approve Borrow Request?'
   }
 
-  if (confirmationAction.value === 'Reject') {
-    return 'Reject borrow request?'
+  if (confirmationAction.value === 'Cancel') {
+    return 'Cancel Borrow Request?'
   }
 
-  return 'Confirm book return?'
+  return 'Confirm Book Return?'
 })
 
 const confirmationMessage = computed(() => {
   if (confirmationAction.value === 'Return') {
-    return `Confirm that ${selectedLoan.value?.book?.title || 'this book'} has been returned by ${getStudentName(selectedLoan.value?.student)}?`
+    return `Confirm that ${selectedLoan.value?.book?.title || 'this book'} has been returned by ${selectedLoan.value?.student?.full_name || 'the student'}?`
   }
 
   const request = selectedRequest.value
@@ -419,28 +112,30 @@ const confirmationMessage = computed(() => {
   if (!request) return ''
 
   const bookTitle = request.book?.title || request.title || 'this book'
-  const studentName = getStudentName(request.student)
+  const studentName = request.student?.full_name || 'Unknown student'
 
-  return confirmationAction.value === 'Approve'
-    ? `Approve ${studentName}'s request for ${bookTitle}? The book will be recorded as borrowed with a 5-day due date.`
-    : `Reject ${studentName}'s request for ${bookTitle}?`
+  if (confirmationAction.value === 'Approve') {
+    return `Approve ${studentName}'s request for ${bookTitle}?`
+  }
+
+  return `Cancel ${studentName}'s request for ${bookTitle}?`
 })
 
-const pendingRequests = computed(() =>
-  requests.value.filter(request => request.status === 'pending'),
-)
+// ========================================
+// HELPERS
+// ========================================
 
-const otherRequests = computed(() =>
-  requests.value.filter(request => request.status !== 'pending'),
-)
+function formatDate(value) {
+  if (!value) return 'Not available'
 
-const activeLoans = computed(() =>
-  borrowedBooks.value.filter(loan => loan.status === 'borrowed'),
-)
-
-const returnedLoans = computed(() =>
-  borrowedBooks.value.filter(loan => loan.status === 'returned'),
-)
+  return new Date(value).toLocaleString('en-PH', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
 
 function statusLabel(status) {
   const labels = {
@@ -455,42 +150,474 @@ function statusLabel(status) {
     returned: 'Returned',
   }
 
-  return labels[status] || status
+  return labels[String(status || '').toLowerCase()] || status
 }
 
 function statusClass(status) {
   return String(status || '').toLowerCase().replaceAll('_', '-')
 }
 
+function getAvailability(book) {
+  return Number(book.available_copies) > 0
+    ? 'Available'
+    : 'Unavailable'
+}
+
+// ========================================
+// FETCH BOOK CATALOG
+// ========================================
+
+async function fetchBooks() {
+  loadingBooks.value = true
+  booksError.value = ''
+
+  try {
+    const { data, error } = await supabase
+      .from('library_books')
+      .select(`
+        id,
+        isbn,
+        title,
+        author,
+        category,
+        shelf_location,
+        total_copies,
+        available_copies,
+        is_active
+      `)
+      .eq('is_active', true)
+      .order('title', { ascending: true })
+
+    if (error) throw error
+
+    books.value = data || []
+  } catch (error) {
+    console.error('Fetch books error:', error)
+    booksError.value = error.message
+  } finally {
+    loadingBooks.value = false
+  }
+}
+
+// ========================================
+// ADD BOOK
+// ========================================
+
+function openAddBookModal() {
+  newBookError.value = ''
+
+  newBook.value = {
+    isbn: '',
+    title: '',
+    author: '',
+    category: '',
+    shelf_location: '',
+    total_copies: 1,
+  }
+
+  showAddBookModal.value = true
+}
+
+function closeAddBookModal() {
+  if (savingBook.value) return
+  showAddBookModal.value = false
+}
+
+async function addBook() {
+  if (savingBook.value) return
+
+  if (!newBook.value.title.trim()) {
+    newBookError.value = 'Book title is required.'
+    return
+  }
+
+  const copies = Number(newBook.value.total_copies)
+
+  if (!Number.isInteger(copies) || copies < 1) {
+    newBookError.value = 'Enter a valid number of copies.'
+    return
+  }
+
+  savingBook.value = true
+  newBookError.value = ''
+
+  try {
+    const { error } = await supabase
+      .from('library_books')
+      .insert({
+        isbn: newBook.value.isbn.trim() || null,
+        title: newBook.value.title.trim(),
+        author: newBook.value.author.trim() || null,
+        category: newBook.value.category.trim() || null,
+        shelf_location: newBook.value.shelf_location.trim() || null,
+        total_copies: copies,
+        available_copies: copies,
+        is_active: true,
+      })
+
+    if (error) throw error
+
+    showAddBookModal.value = false
+    actionMessage.value = 'Book added successfully.'
+
+    await fetchBooks()
+  } catch (error) {
+    console.error('Add book error:', error)
+    newBookError.value = error.message
+  } finally {
+    savingBook.value = false
+  }
+}
+
+// ========================================
+// FETCH PENDING BORROW REQUESTS
+// ========================================
+
+async function fetchRequests() {
+  loadingRequests.value = true
+  requestsError.value = ''
+
+  try {
+    const { data, error } = await supabase
+      .from('service_requests')
+      .select(`
+        id,
+        student_id,
+        book_id,
+        title,
+        details,
+        request_type,
+        status,
+        staff_notes,
+        submitted_at
+      `)
+      .eq('service_id', LIBRARY_SERVICE_ID)
+      .order('submitted_at', { ascending: false })
+
+    if (error) throw error
+
+    const rows = data || []
+
+    const studentIds = [
+      ...new Set(rows.map(item => item.student_id).filter(Boolean)),
+    ]
+
+    const bookIds = [
+      ...new Set(rows.map(item => item.book_id).filter(Boolean)),
+    ]
+
+    let profiles = []
+    let selectedBooks = []
+
+    if (studentIds.length) {
+      const result = await supabase
+        .from('profiles')
+        .select('id, student_id, full_name, university_email, program')
+        .in('id', studentIds)
+
+      if (result.error) throw result.error
+
+      profiles = result.data || []
+    }
+
+    if (bookIds.length) {
+      const result = await supabase
+        .from('library_books')
+        .select('id, title, author, isbn, category, available_copies')
+        .in('id', bookIds)
+
+      if (result.error) throw result.error
+
+      selectedBooks = result.data || []
+    }
+
+    requests.value = rows.map(request => ({
+      ...request,
+      student: profiles.find(
+        profile => profile.id === request.student_id
+      ) || null,
+      book: selectedBooks.find(
+        book => book.id === request.book_id
+      ) || null,
+    }))
+  } catch (error) {
+    console.error('Fetch requests error:', error)
+    requestsError.value = error.message
+  } finally {
+    loadingRequests.value = false
+  }
+}
+
+// ========================================
+// FETCH BORROWED BOOKS
+// ========================================
+
+async function fetchBorrowedBooks() {
+  loadingLoans.value = true
+  loansError.value = ''
+
+  try {
+    const { data, error } = await supabase
+      .from('book_loans')
+      .select(`
+        id,
+        book_id,
+        student_id,
+        borrowed_at,
+        due_at,
+        returned_at,
+        status,
+        source_request_id
+      `)
+      .order('borrowed_at', { ascending: false })
+
+    if (error) throw error
+
+    const rows = data || []
+
+    const studentIds = [
+      ...new Set(rows.map(item => item.student_id).filter(Boolean)),
+    ]
+
+    const bookIds = [
+      ...new Set(rows.map(item => item.book_id).filter(Boolean)),
+    ]
+
+    let profiles = []
+    let selectedBooks = []
+
+    if (studentIds.length) {
+      const result = await supabase
+        .from('profiles')
+        .select('id, student_id, full_name')
+        .in('id', studentIds)
+
+      if (result.error) throw result.error
+
+      profiles = result.data || []
+    }
+
+    if (bookIds.length) {
+      const result = await supabase
+        .from('library_books')
+        .select('id, title, author')
+        .in('id', bookIds)
+
+      if (result.error) throw result.error
+
+      selectedBooks = result.data || []
+    }
+
+    borrowedBooks.value = rows.map(loan => ({
+      ...loan,
+      student: profiles.find(
+        profile => profile.id === loan.student_id
+      ) || null,
+      book: selectedBooks.find(
+        book => book.id === loan.book_id
+      ) || null,
+    }))
+  } catch (error) {
+    console.error('Fetch loans error:', error)
+    loansError.value = error.message
+  } finally {
+    loadingLoans.value = false
+  }
+}
+
+// ========================================
+// REFRESH
+// ========================================
+
+async function refreshAll() {
+  await Promise.all([
+    fetchBooks(),
+    fetchRequests(),
+    fetchBorrowedBooks(),
+  ])
+}
+
+// ========================================
+// CONFIRMATION MODALS
+// ========================================
+
+function openConfirmation(request, action) {
+  selectedRequest.value = request
+  selectedLoan.value = null
+  confirmationAction.value = action
+  actionError.value = ''
+  actionMessage.value = ''
+  showConfirmation.value = true
+}
+
+function openReturnConfirmation(loan) {
+  selectedLoan.value = loan
+  selectedRequest.value = null
+  confirmationAction.value = 'Return'
+  actionError.value = ''
+  showConfirmation.value = true
+}
+
+function closeConfirmation() {
+  if (processing.value) return
+
+  showConfirmation.value = false
+  selectedRequest.value = null
+  selectedLoan.value = null
+  actionError.value = ''
+}
+
+// ========================================
+// APPROVE / CANCEL / RETURN
+// ========================================
+
+async function confirmRequest() {
+  if (processing.value) return
+
+  processing.value = true
+  actionError.value = ''
+  actionMessage.value = ''
+
+  try {
+    // APPROVE REQUEST
+    if (confirmationAction.value === 'Approve') {
+      if (!selectedRequest.value) {
+        throw new Error('No selected request.')
+      }
+
+      if (!selectedRequest.value.book_id) {
+        throw new Error(
+          'This request has no selected book. A valid book selection is required.'
+        )
+      }
+
+      const { error } = await supabase.rpc(
+        'approve_library_borrow_request',
+        {
+          p_request_id: selectedRequest.value.id,
+        }
+      )
+
+      if (error) throw error
+
+      actionMessage.value = 'Borrow request approved successfully.'
+    }
+
+    // CANCEL REQUEST
+    else if (confirmationAction.value === 'Cancel') {
+      if (!selectedRequest.value) {
+        throw new Error('No selected request.')
+      }
+
+      const { data: userData } = await supabase.auth.getUser()
+
+      const { data, error } = await supabase
+        .from('service_requests')
+        .update({
+          status: 'cancelled',
+          handled_by: userData.user?.id || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', selectedRequest.value.id)
+        .eq('service_id', LIBRARY_SERVICE_ID)
+        .eq('status', 'pending')
+        .select('id')
+        .maybeSingle()
+
+      if (error) throw error
+
+      if (!data) {
+        throw new Error(
+          'Request was not updated. It may no longer be pending or permission is missing.'
+        )
+      }
+
+      actionMessage.value = 'Borrow request cancelled successfully.'
+    }
+
+    // RETURN BOOK
+    else if (confirmationAction.value === 'Return') {
+      if (!selectedLoan.value) {
+        throw new Error('No selected book loan.')
+      }
+
+      const { error } = await supabase.rpc(
+        'return_library_book',
+        {
+          p_loan_id: selectedLoan.value.id,
+        }
+      )
+
+      if (error) throw error
+
+      actionMessage.value = 'Book returned successfully.'
+    }
+
+    showConfirmation.value = false
+    selectedRequest.value = null
+    selectedLoan.value = null
+
+    await refreshAll()
+  } catch (error) {
+    console.error('Library action error:', error)
+    actionError.value = error.message || 'Something went wrong.'
+  } finally {
+    processing.value = false
+  }
+}
+
+// ========================================
+// REALTIME
+// ========================================
+
 function subscribeToChanges() {
   const channel = supabase
-    .channel('library-books-page-changes')
+    .channel('library-books-realtime')
+
     .on(
       'postgres_changes',
-      { event: '*', schema: 'public', table: 'library_books' },
-      () => refreshAll(),
+      {
+        event: '*',
+        schema: 'public',
+        table: 'library_books',
+      },
+      () => {
+        fetchBooks()
+        fetchRequests()
+      }
     )
+
     .on(
       'postgres_changes',
-      { event: '*', schema: 'public', table: 'service_requests' },
+      {
+        event: '*',
+        schema: 'public',
+        table: 'service_requests',
+      },
       payload => {
-        if (
-          payload.new?.service_id === LIBRARY_SERVICE_ID ||
-          payload.old?.service_id === LIBRARY_SERVICE_ID
-        ) {
+        const serviceId =
+          payload.new?.service_id || payload.old?.service_id
+
+        if (serviceId === LIBRARY_SERVICE_ID) {
           fetchRequests()
           fetchBorrowedBooks()
         }
-      },
+      }
     )
+
     .on(
       'postgres_changes',
-      { event: '*', schema: 'public', table: 'book_loans' },
+      {
+        event: '*',
+        schema: 'public',
+        table: 'book_loans',
+      },
       () => {
         fetchBorrowedBooks()
         fetchBooks()
-      },
+      }
     )
+
     .subscribe()
 
   subscriptions.push(channel)
@@ -512,12 +639,14 @@ onUnmounted(() => {
 
 <template>
   <main class="books-page">
+
     <header class="page-heading">
       <h1>Books</h1>
-      <p>Record only the essential Borrow → Return transaction flow.</p>
+      <p>Manage borrow requests, book catalog, and returns.</p>
     </header>
 
-    <nav class="book-tabs" aria-label="Book sections">
+    <!-- TABS -->
+    <nav class="book-tabs">
       <button
         v-for="tab in ['Borrow Requests', 'Catalog', 'Borrowed & Returns']"
         :key="tab"
@@ -527,6 +656,12 @@ onUnmounted(() => {
         @click="activeTab = tab"
       >
         {{ tab }}
+        <span
+          v-if="tab === 'Borrow Requests' && pendingRequests.length"
+          class="tab-count"
+        >
+          {{ pendingRequests.length }}
+        </span>
       </button>
     </nav>
 
@@ -534,149 +669,187 @@ onUnmounted(() => {
       {{ actionMessage }}
     </p>
 
+    <!-- ================================= -->
     <!-- BORROW REQUESTS -->
-    <section v-if="activeTab === 'Borrow Requests'" class="request-list">
+    <!-- ================================= -->
+
+    <section v-if="activeTab === 'Borrow Requests'">
+
       <div class="section-toolbar">
-        <span>Pending requests: {{ pendingRequests.length }}</span>
+        <span>
+          Pending Requests: {{ pendingRequests.length }}
+        </span>
+
         <button
           type="button"
           class="refresh-button"
           :disabled="loadingRequests"
           @click="fetchRequests"
         >
-          {{ loadingRequests ? 'Refreshing...' : 'Refresh' }}
+          {{ loadingRequests ? 'Loading...' : 'Refresh' }}
         </button>
       </div>
 
       <p v-if="requestsError" class="error-message">
-        Unable to load requests: {{ requestsError }}
+        {{ requestsError }}
       </p>
 
-      <p
-        v-if="loadingRequests && requests.length === 0"
-        class="empty-message"
-      >
-        Loading borrow requests...
-      </p>
+      <div class="table-container">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Student</th>
+              <th>Book</th>
+              <th>Request Details</th>
+              <th>Date Submitted</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
 
-      <article
-        v-for="request in pendingRequests"
-        :key="request.id"
-        class="request-row"
-      >
-        <div class="request-info">
-          <p class="request-id">
-            {{ request.student?.student_id || 'No student number' }}
-            · {{ request.id }}
-          </p>
+          <tbody>
+            <tr v-if="loadingRequests && requests.length === 0">
+              <td colspan="6" class="empty-cell">
+                Loading pending requests...
+              </td>
+            </tr>
 
-          <h2>{{ request.book?.title || request.title || 'Book not specified' }}</h2>
+            <tr
+              v-for="request in pendingRequests"
+              :key="request.id"
+            >
+              <td>
+                <strong>
+                  {{ request.student?.full_name || 'Unknown Student' }}
+                </strong>
 
-          <p class="request-meta">
-            {{ getStudentName(request.student) }}
-            · {{ request.student?.program || 'No program' }}
-            · {{ formatDate(request.submitted_at) }}
-          </p>
+                <small>
+                  {{ request.student?.student_id || 'No student ID' }}
+                </small>
+              </td>
 
-          <p v-if="request.book" class="request-book-info">
-            {{ request.book.author || 'Author not specified' }}
-            · {{ request.book.category || 'No category' }}
-          </p>
+              <td>
+                <strong>
+                  {{ request.book?.title || request.title || 'Book not specified' }}
+                </strong>
 
-          <p v-else class="request-book-info">
-            Selected book information is unavailable.
-          </p>
+                <small>
+                  {{ request.book?.author || 'Author not specified' }}
+                </small>
+              </td>
 
-          <p v-if="request.details" class="request-purpose">
-            <strong>Student Notes / Purpose:</strong>
-            {{ request.details }}
-          </p>
-        </div>
+              <td>
+                {{ request.details || request.request_type || 'Borrow Request' }}
+              </td>
 
-        <div class="request-actions">
-          <button
-            type="button"
-            class="action-button approve-button"
-            :disabled="!request.book_id"
-            @click="openConfirmation(request, 'Approve')"
-          >
-            Approve
-          </button>
+              <td>
+                {{ formatDate(request.submitted_at) }}
+              </td>
 
-          <button
-            type="button"
-            class="action-button reject-button"
-            @click="openConfirmation(request, 'Reject')"
-          >
-            Reject
-          </button>
-        </div>
-      </article>
+              <td>
+                <span class="status pending">
+                  Pending
+                </span>
+              </td>
 
-      <p
-        v-if="!loadingRequests && !requestsError && pendingRequests.length === 0"
-        class="empty-message"
-      >
-        No pending borrow requests.
-      </p>
+              <td>
+                <div class="table-actions">
+                  <button
+                    type="button"
+                    class="action-button approve-button"
+                    :disabled="processing"
+                    @click="openConfirmation(request, 'Approve')"
+                  >
+                    Approve
+                  </button>
 
-      <div v-if="otherRequests.length" class="other-requests">
+                  <button
+                    type="button"
+                    class="action-button cancel-button"
+                    :disabled="processing"
+                    @click="openConfirmation(request, 'Cancel')"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </td>
+            </tr>
+
+            <tr
+              v-if="!loadingRequests && !requestsError && pendingRequests.length === 0"
+            >
+              <td colspan="6" class="empty-cell">
+                No pending borrow requests.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- REQUEST HISTORY -->
+
+      <div class="history-section">
         <h3>Request History</h3>
 
-        <article
-          v-for="request in otherRequests"
-          :key="request.id"
-          class="request-row history-row"
-        >
-          <div class="request-info">
-            <p class="request-id">
-              {{ request.student?.student_id || 'No student number' }}
-              · {{ request.id }}
-            </p>
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>Book</th>
+                <th>Date Submitted</th>
+                <th>Status</th>
+              </tr>
+            </thead>
 
-            <h2>{{ request.book?.title || request.title || 'Book not specified' }}</h2>
+            <tbody>
+              <tr v-for="request in otherRequests" :key="request.id">
+                <td>
+                  {{ request.student?.full_name || 'Unknown Student' }}
+                </td>
 
-            <p class="request-meta">
-              {{ getStudentName(request.student) }}
-              · {{ formatDate(request.submitted_at) }}
-            </p>
-          </div>
+                <td>
+                  {{ request.book?.title || request.title || 'Book not specified' }}
+                </td>
 
-          <span
-            class="request-status"
-            :class="statusClass(request.status)"
-          >
-            {{ statusLabel(request.status) }}
-          </span>
-        </article>
+                <td>
+                  {{ formatDate(request.submitted_at) }}
+                </td>
+
+                <td>
+                  <span
+                    class="status"
+                    :class="statusClass(request.status)"
+                  >
+                    {{ statusLabel(request.status) }}
+                  </span>
+                </td>
+              </tr>
+
+              <tr v-if="otherRequests.length === 0">
+                <td colspan="4" class="empty-cell">
+                  No request history yet.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </section>
 
+    <!-- ================================= -->
     <!-- CATALOG -->
-    <section v-else-if="activeTab === 'Catalog'" class="catalog-section">
+    <!-- ================================= -->
+
+    <section v-else-if="activeTab === 'Catalog'">
+
       <div class="catalog-toolbar">
-        <label class="search-box">
-          <span class="visually-hidden">Search books</span>
-
-          <input
-            v-model="searchBook"
-            type="search"
-            placeholder="Search book"
-          />
-
-          <svg
-            viewBox="0 0 24 24"
-            width="19"
-            height="19"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.7"
-            aria-hidden="true"
-          >
-            <circle cx="10.8" cy="10.8" r="6.8" />
-            <path d="m16 16 4.2 4.2" />
-          </svg>
-        </label>
+        <input
+          v-model="searchBook"
+          type="search"
+          class="search-input"
+          placeholder="Search books..."
+        />
 
         <button
           type="button"
@@ -684,21 +857,32 @@ onUnmounted(() => {
           :disabled="loadingBooks"
           @click="fetchBooks"
         >
-          {{ loadingBooks ? 'Refreshing...' : 'Refresh' }}
+          {{ loadingBooks ? 'Loading...' : 'Refresh' }}
+        </button>
+
+        <button
+          type="button"
+          class="add-book-button"
+          @click="openAddBookModal"
+        >
+          + Add Book
         </button>
       </div>
 
       <p v-if="booksError" class="error-message">
-        Unable to load books: {{ booksError }}
+        {{ booksError }}
       </p>
 
-      <div class="catalog-table-wrap">
-        <table class="catalog-table">
+      <div class="table-container">
+        <table class="data-table">
           <thead>
             <tr>
-              <th>Book</th>
-              <th>Author</th>
               <th>ISBN</th>
+              <th>Book Title</th>
+              <th>Author</th>
+              <th>Category</th>
+              <th>Shelf Location</th>
+              <th>Total Copies</th>
               <th>Available Copies</th>
               <th>Availability</th>
             </tr>
@@ -706,25 +890,25 @@ onUnmounted(() => {
 
           <tbody>
             <tr v-if="loadingBooks && books.length === 0">
-              <td colspan="5" class="no-results">Loading books...</td>
+              <td colspan="8" class="empty-cell">
+                Loading books...
+              </td>
             </tr>
 
-            <tr v-for="book in filteredBooks" :key="book.id">
-              <td>
-                <strong>{{ book.title }}</strong>
-                <small class="book-category">
-                  {{ book.category || 'No category' }}
-                  · {{ book.shelf_location || 'No shelf assigned' }}
-                </small>
-              </td>
-
-              <td>{{ book.author || 'Not specified' }}</td>
-              <td>{{ book.isbn || 'No ISBN' }}</td>
-              <td>{{ book.available_copies }} / {{ book.total_copies }}</td>
-
+            <tr
+              v-for="book in filteredBooks"
+              :key="book.id"
+            >
+              <td>{{ book.isbn || 'N/A' }}</td>
+              <td><strong>{{ book.title }}</strong></td>
+              <td>{{ book.author || 'N/A' }}</td>
+              <td>{{ book.category || 'N/A' }}</td>
+              <td>{{ book.shelf_location || 'N/A' }}</td>
+              <td>{{ book.total_copies }}</td>
+              <td>{{ book.available_copies }}</td>
               <td>
                 <span
-                  class="availability-badge"
+                  class="status"
                   :class="getAvailability(book).toLowerCase()"
                 >
                   {{ getAvailability(book) }}
@@ -733,18 +917,10 @@ onUnmounted(() => {
             </tr>
 
             <tr
-              v-if="
-                !loadingBooks &&
-                !booksError &&
-                filteredBooks.length === 0
-              "
+              v-if="!loadingBooks && !booksError && filteredBooks.length === 0"
             >
-              <td colspan="5" class="no-results">
-                {{
-                  books.length === 0
-                    ? 'No books available in the catalog.'
-                    : 'No books match your search.'
-                }}
+              <td colspan="8" class="empty-cell">
+                No books found.
               </td>
             </tr>
           </tbody>
@@ -752,10 +928,16 @@ onUnmounted(() => {
       </div>
     </section>
 
-    <!-- BORROWED AND RETURNS -->
-    <section v-else class="borrowed-list">
+    <!-- ================================= -->
+    <!-- BORROWED & RETURNS -->
+    <!-- ================================= -->
+
+    <section v-else>
+
       <div class="section-toolbar">
-        <span>Currently borrowed: {{ activeLoans.length }}</span>
+        <span>
+          Currently Borrowed: {{ activeLoans.length }}
+        </span>
 
         <button
           type="button"
@@ -763,130 +945,249 @@ onUnmounted(() => {
           :disabled="loadingLoans"
           @click="fetchBorrowedBooks"
         >
-          {{ loadingLoans ? 'Refreshing...' : 'Refresh' }}
+          {{ loadingLoans ? 'Loading...' : 'Refresh' }}
         </button>
       </div>
 
       <p v-if="loansError" class="error-message">
-        Unable to load book loans: {{ loansError }}
+        {{ loansError }}
       </p>
 
-      <p
-        v-if="loadingLoans && borrowedBooks.length === 0"
-        class="empty-message"
-      >
-        Loading book transactions...
-      </p>
+      <div class="table-container">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Student</th>
+              <th>Book</th>
+              <th>Borrowed Date</th>
+              <th>Due Date</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
 
-      <article
-        v-for="loan in activeLoans"
-        :key="loan.id"
-        class="borrowed-row"
-      >
-        <div class="borrowed-info">
-          <h2>{{ loan.book?.title || 'Unknown book' }}</h2>
+          <tbody>
+            <tr
+              v-for="loan in activeLoans"
+              :key="loan.id"
+            >
+              <td>
+                {{ loan.student?.full_name || 'Unknown Student' }}
+              </td>
 
-          <p class="borrowed-reference">
-            {{ loan.student?.full_name || 'Unknown student' }}
-            · {{ loan.student?.student_id || 'No student number' }}
-          </p>
+              <td>
+                {{ loan.book?.title || 'Unknown Book' }}
+              </td>
 
-          <p class="return-date">
-            Borrowed: {{ formatDate(loan.borrowed_at) }}
-          </p>
+              <td>{{ formatDate(loan.borrowed_at) }}</td>
+              <td>{{ formatDate(loan.due_at) }}</td>
 
-          <p class="return-date">
-            Due: {{ formatDate(loan.due_at) }}
-          </p>
+              <td>
+                <span class="status borrowed">
+                  Borrowed
+                </span>
+              </td>
+
+              <td>
+                <button
+                  type="button"
+                  class="action-button return-button"
+                  :disabled="processing"
+                  @click="openReturnConfirmation(loan)"
+                >
+                  Mark Returned
+                </button>
+              </td>
+            </tr>
+
+            <tr
+              v-if="!loadingLoans && !loansError && activeLoans.length === 0"
+            >
+              <td colspan="6" class="empty-cell">
+                No currently borrowed books.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- RETURN HISTORY -->
+
+      <div class="history-section">
+        <h3>Returned Books History</h3>
+
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>Book</th>
+                <th>Borrowed Date</th>
+                <th>Returned Date</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              <tr
+                v-for="loan in returnedLoans"
+                :key="loan.id"
+              >
+                <td>
+                  {{ loan.student?.full_name || 'Unknown Student' }}
+                </td>
+
+                <td>
+                  {{ loan.book?.title || 'Unknown Book' }}
+                </td>
+
+                <td>{{ formatDate(loan.borrowed_at) }}</td>
+                <td>{{ formatDate(loan.returned_at) }}</td>
+
+                <td>
+                  <span class="status returned">
+                    Returned
+                  </span>
+                </td>
+              </tr>
+
+              <tr v-if="returnedLoans.length === 0">
+                <td colspan="5" class="empty-cell">
+                  No returned books yet.
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-
-        <div class="loan-actions">
-          <span class="availability-badge borrowed">
-            Borrowed
-          </span>
-
-          <button
-            type="button"
-            class="action-button return-button"
-            @click="openReturnConfirmation(loan)"
-          >
-            Mark Returned
-          </button>
-        </div>
-      </article>
-
-      <p
-        v-if="!loadingLoans && !loansError && activeLoans.length === 0"
-        class="empty-message"
-      >
-        No currently borrowed books.
-      </p>
-
-      <div v-if="returnedLoans.length" class="returned-section">
-        <h3>Returned Books</h3>
-
-        <article
-          v-for="loan in returnedLoans"
-          :key="loan.id"
-          class="borrowed-row returned-row"
-        >
-          <div>
-            <h2>{{ loan.book?.title || 'Unknown book' }}</h2>
-
-            <p class="borrowed-reference">
-              {{ loan.student?.full_name || 'Unknown student' }}
-              · {{ loan.student?.student_id || 'No student number' }}
-            </p>
-
-            <p class="return-date">
-              Returned: {{ formatDate(loan.returned_at) }}
-            </p>
-          </div>
-
-          <span class="availability-badge available">
-            Returned
-          </span>
-        </article>
       </div>
     </section>
 
-    <!-- CONFIRMATION POPUP -->
+    <!-- ================================= -->
+    <!-- ADD BOOK MODAL -->
+    <!-- ================================= -->
+
+    <div
+      v-if="showAddBookModal"
+      class="modal-overlay"
+      @click.self="closeAddBookModal"
+    >
+      <div class="modal-content">
+        <h2>Add New Book</h2>
+        <p class="modal-description">
+          Enter the book details.
+        </p>
+
+        <form @submit.prevent="addBook">
+
+          <label>
+            ISBN
+            <input
+              v-model="newBook.isbn"
+              type="text"
+              placeholder="Enter ISBN"
+            />
+          </label>
+
+          <label>
+            Book Title *
+            <input
+              v-model="newBook.title"
+              type="text"
+              placeholder="Enter book title"
+              required
+            />
+          </label>
+
+          <label>
+            Author
+            <input
+              v-model="newBook.author"
+              type="text"
+              placeholder="Enter author"
+            />
+          </label>
+
+          <label>
+            Category
+            <input
+              v-model="newBook.category"
+              type="text"
+              placeholder="Enter category"
+            />
+          </label>
+
+          <label>
+            Shelf Location
+            <input
+              v-model="newBook.shelf_location"
+              type="text"
+              placeholder="Example: Shelf A-01"
+            />
+          </label>
+
+          <label>
+            Total Copies *
+            <input
+              v-model.number="newBook.total_copies"
+              type="number"
+              min="1"
+              step="1"
+              required
+            />
+          </label>
+
+          <p v-if="newBookError" class="error-message">
+            {{ newBookError }}
+          </p>
+
+          <div class="modal-actions">
+            <button
+              type="button"
+              class="action-button cancel-button"
+              :disabled="savingBook"
+              @click="closeAddBookModal"
+            >
+              Cancel
+            </button>
+
+            <button
+              type="submit"
+              class="action-button approve-button"
+              :disabled="savingBook"
+            >
+              {{ savingBook ? 'Saving...' : 'Save Book' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- ================================= -->
+    <!-- CONFIRMATION MODAL -->
+    <!-- ================================= -->
+
     <div
       v-if="showConfirmation"
       class="modal-overlay"
       @click.self="closeConfirmation"
-      @keydown.esc="closeConfirmation"
     >
-      <section
-        class="confirmation-modal"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="confirmationTitle"
-      >
-        <div
-          class="warning-icon"
-          :class="{
-            danger: confirmationAction === 'Reject',
-            returned: confirmationAction === 'Return',
-          }"
-        >
-          !
-        </div>
+      <div class="modal-content confirmation-modal">
+        <div class="confirmation-icon">!</div>
 
         <h2>{{ confirmationTitle }}</h2>
 
-        <p class="confirmation-message">
+        <p class="modal-description">
           {{ confirmationMessage }}
         </p>
 
-        <p v-if="actionError" class="error-message modal-error">
+        <p v-if="actionError" class="error-message">
           {{ actionError }}
         </p>
 
-        <div class="confirmation-actions">
+        <div class="modal-actions">
           <button
             type="button"
-            class="action-button go-back-button"
+            class="action-button cancel-button"
             :disabled="processing"
             @click="closeConfirmation"
           >
@@ -895,31 +1196,24 @@ onUnmounted(() => {
 
           <button
             type="button"
-            class="action-button confirm-button"
-            :class="{
-              'confirm-reject': confirmationAction === 'Reject',
-              'confirm-return': confirmationAction === 'Return',
-            }"
+            class="action-button approve-button"
+            :class="{ 'danger-button': confirmationAction === 'Cancel' }"
             :disabled="processing"
             @click="confirmRequest"
           >
-            {{
-              processing
-                ? 'Processing...'
-                : confirmationAction
-            }}
+            {{ processing ? 'Processing...' : confirmationAction }}
           </button>
         </div>
-      </section>
+      </div>
     </div>
+
   </main>
 </template>
 
 <style scoped>
 .books-page {
-  min-width: 0;
-  min-height: calc(100vh - 104px);
-  padding: 22px;
+  min-height: 100vh;
+  padding: 24px;
   background: #eedfdf;
   color: #39070a;
   font-family: Arial, Helvetica, sans-serif;
@@ -928,14 +1222,14 @@ onUnmounted(() => {
 .page-heading h1 {
   margin: 0;
   font-family: Georgia, 'Times New Roman', serif;
-  font-size: 24px;
+  font-size: 25px;
   font-weight: 500;
 }
 
 .page-heading p {
-  margin: 0 0 15px;
+  margin: 5px 0 20px;
+  color: #70595a;
   font-size: 12px;
-  line-height: 1.5;
 }
 
 .book-tabs {
@@ -946,120 +1240,151 @@ onUnmounted(() => {
 }
 
 .tab-button {
-  min-height: 34px;
-  padding: 0 17px;
+  padding: 10px 17px;
   border: 1px solid #a76c70;
-  border-radius: 22px;
+  border-radius: 25px;
   background: #f8eeee;
   color: #39070a;
   font-size: 12px;
   cursor: pointer;
 }
 
-.tab-button:hover {
-  background: #e7cecf;
-}
-
 .tab-button.active {
   border-color: #570910;
   background: #570910;
-  color: #fff7f5;
+  color: white;
 }
 
-.request-list,
-.borrowed-list,
-.catalog-table-wrap {
-  overflow: hidden;
+.tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 5px;
+  padding: 0 5px;
+  border-radius: 20px;
+  background: white;
+  color: #570910;
+  font-size: 10px;
+}
+
+.section-toolbar,
+.catalog-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px;
   border: 1px solid #c4a1a2;
-  border-radius: 14px;
+  border-radius: 10px;
+  background: #f8eeee;
+  font-size: 12px;
+}
+
+.catalog-toolbar {
+  justify-content: flex-start;
+}
+
+.search-input {
+  flex: 1;
+  min-width: 120px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid #bd9194;
+  border-radius: 6px;
+  outline: none;
+  background: white;
+  color: #39070a;
+  font-size: 12px;
+}
+
+.search-input:focus {
+  border-color: #570910;
+}
+
+.refresh-button,
+.add-book-button {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid #570910;
+  border-radius: 6px;
+  background: #570910;
+  color: white;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.refresh-button:hover,
+.add-book-button:hover {
+  background: #74121b;
+}
+
+.refresh-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.table-container {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid #c4a1a2;
+  border-radius: 10px;
   background: #f8eeee;
 }
 
-.section-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 11px 15px;
-  border-bottom: 1px solid #e6d2d2;
-  color: #554041;
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.data-table th {
+  padding: 13px;
+  background: #f1e3e3;
+  color: #542d30;
+  font-size: 10px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.data-table td {
+  padding: 13px;
+  border-top: 1px solid #e6d2d2;
+  color: #39070a;
   font-size: 11px;
-  font-weight: 600;
+  vertical-align: middle;
 }
 
-.request-row,
-.borrowed-row {
+.data-table td strong,
+.data-table td small {
+  display: block;
+}
+
+.data-table td small {
+  margin-top: 4px;
+  color: #795f60;
+  font-size: 10px;
+}
+
+.data-table tbody tr:hover {
+  background: #f4e6e6;
+}
+
+.table-actions {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 14px 17px;
-  border-bottom: 1px solid #e6d2d2;
-}
-
-.request-row:last-child,
-.borrowed-row:last-child {
-  border-bottom: none;
-}
-
-.request-info,
-.borrowed-info {
-  min-width: 0;
-  flex: 1;
-}
-
-.request-id {
-  margin: 0 0 4px;
-  color: #70595a;
-  font-size: 10px;
-  overflow-wrap: anywhere;
-}
-
-.request-info h2,
-.borrowed-row h2 {
-  margin: 0 0 4px;
-  color: #2f080a;
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.request-meta,
-.borrowed-reference,
-.return-date,
-.request-book-info {
-  margin: 0;
-  color: #554041;
-  font-size: 10px;
-  line-height: 1.6;
-}
-
-.request-purpose {
-  max-width: 470px;
-  margin: 9px 0 0;
-  padding: 7px 9px;
-  border-radius: 5px;
-  background: #e7d0d1;
-  color: #44282a;
-  font-size: 10px;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-
-.request-actions,
-.loan-actions {
-  display: flex;
-  flex-shrink: 0;
-  align-items: center;
   gap: 6px;
 }
 
 .action-button {
-  min-height: 31px;
-  padding: 0 15px;
+  min-height: 32px;
+  padding: 0 12px;
   border: 1px solid #570910;
   border-radius: 6px;
-  font-size: 11px;
+  font-size: 10px;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .action-button:disabled {
@@ -1067,25 +1392,21 @@ onUnmounted(() => {
   cursor: not-allowed;
 }
 
-.approve-button,
-.confirm-button {
+.approve-button {
   background: #570910;
   color: white;
 }
 
-.reject-button,
-.go-back-button {
-  background: #f8eeee;
-  color: #39070a;
-}
-
-.approve-button:hover,
-.confirm-button:hover {
+.approve-button:hover {
   background: #74121b;
 }
 
-.reject-button:hover,
-.go-back-button:hover {
+.cancel-button {
+  background: #f8eeee;
+  color: #570910;
+}
+
+.cancel-button:hover {
   background: #ead6d7;
 }
 
@@ -1095,218 +1416,86 @@ onUnmounted(() => {
   color: white;
 }
 
-.return-button:hover {
-  background: #1e5d3b;
+.danger-button {
+  border-color: #bd2020;
+  background: #bd2020;
 }
 
-.request-status {
+.status {
   display: inline-block;
-  flex-shrink: 0;
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.request-status.claimed,
-.request-status.completed {
-  color: #28744b;
-}
-
-.request-status.rejected,
-.request-status.cancelled {
-  color: #c60000;
-}
-
-.request-status.pending {
-  color: #9a6a13;
-}
-
-.request-status.processing,
-.request-status.ready-for-pickup {
-  color: #70551a;
-}
-
-.other-requests,
-.returned-section {
-  border-top: 1px solid #e6d2d2;
-}
-
-.other-requests h3,
-.returned-section h3 {
-  margin: 0;
-  padding: 14px 17px 8px;
-  color: #542d30;
-  font-family: Georgia, 'Times New Roman', serif;
-  font-size: 15px;
-  font-weight: 500;
-}
-
-.history-row {
-  padding-top: 11px;
-  padding-bottom: 11px;
-}
-
-.catalog-section {
-  display: flex;
-  flex-direction: column;
-  gap: 15px;
-}
-
-.catalog-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-
-.search-box {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  gap: 8px;
-  min-height: 36px;
-  padding: 0 11px;
-  border: 1px solid #bd9194;
-  border-radius: 7px;
-  background: #f8eeee;
-}
-
-.search-box input {
-  width: 100%;
-  min-width: 0;
-  border: 0;
-  outline: none;
-  background: transparent;
-  color: #39070a;
-  font: inherit;
-  font-size: 12px;
-}
-
-.search-box input::placeholder {
-  color: #927879;
-}
-
-.refresh-button {
-  min-height: 36px;
-  padding: 0 15px;
-  border: 1px solid #570910;
-  border-radius: 7px;
-  background: #570910;
-  color: white;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.refresh-button:hover {
-  background: #74121b;
-}
-
-.refresh-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.error-message {
-  margin: 10px 14px;
-  padding: 10px 12px;
-  border-radius: 7px;
-  background: #f4dada;
-  color: #a00000;
-  font-size: 11px;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-
-.success-message {
-  margin: 0 0 14px;
-  padding: 10px 12px;
-  border: 1px solid #a7d1b4;
-  border-radius: 7px;
-  background: #e1f2e5;
-  color: #245c3b;
-  font-size: 11px;
-}
-
-.catalog-table {
-  width: 100%;
-  border-collapse: collapse;
-  text-align: left;
-}
-
-.catalog-table th {
-  padding: 13px 14px;
-  background: #f1e3e3;
-  color: #542d30;
-  font-size: 9px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.catalog-table td {
-  padding: 12px 14px;
-  border-top: 1px solid #e6d2d2;
-  color: #2f080a;
-  font-size: 11px;
-}
-
-.catalog-table tbody tr:hover {
-  background: #f4e6e6;
-}
-
-.book-category {
-  display: block;
-  margin-top: 4px;
-  color: #795f60;
-  font-size: 9px;
-}
-
-.availability-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 76px;
-  padding: 5px 10px;
+  padding: 5px 9px;
   border-radius: 20px;
+  background: #ead6d7;
+  color: #542d30;
   font-size: 9px;
   font-weight: 600;
   white-space: nowrap;
 }
 
-.availability-badge.available {
-  background: #b9dfc7;
-  color: #245c3b;
+.status.pending {
+  background: #f3e4ae;
+  color: #795d13;
 }
 
-.availability-badge.unavailable {
-  background: #f0df91;
-  color: #70551a;
+.status.cancelled,
+.status.rejected {
+  background: #f4cccc;
+  color: #9c1d1d;
 }
 
-.availability-badge.borrowed {
+.status.completed,
+.status.returned,
+.status.available {
+  background: #cce8d4;
+  color: #28613d;
+}
+
+.status.borrowed {
   background: #ecdda8;
   color: #6a4b18;
 }
 
-.borrowed-row {
-  padding: 19px 17px;
+.status.unavailable {
+  background: #f4cccc;
+  color: #9c1d1d;
 }
 
-.borrowed-reference {
-  margin-bottom: 4px;
+.history-section {
+  margin-top: 25px;
 }
 
-.return-date {
-  font-size: 10px;
+.history-section h3 {
+  margin: 0 0 12px;
+  color: #542d30;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 18px;
+  font-weight: 500;
 }
 
-.returned-row {
-  background: #fbf3f3;
-}
-
-.empty-message,
-.no-results {
-  padding: 22px;
-  color: #795f60;
-  font-size: 12px;
+.empty-cell {
+  padding: 25px !important;
+  color: #795f60 !important;
   text-align: center;
+}
+
+.error-message {
+  margin: 10px 0;
+  padding: 10px;
+  border-radius: 6px;
+  background: #f4dada;
+  color: #a00000;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.success-message {
+  margin-bottom: 15px;
+  padding: 10px;
+  border: 1px solid #a7d1b4;
+  border-radius: 6px;
+  background: #e1f2e5;
+  color: #245c3b;
+  font-size: 11px;
 }
 
 .modal-overlay {
@@ -1317,146 +1506,109 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   padding: 18px;
-  background: rgb(20 12 12 / 42%);
+  background: rgb(20 12 12 / 45%);
 }
 
-.confirmation-modal {
-  display: grid;
-  grid-template-columns: 42px minmax(0, 1fr);
-  align-items: center;
-  column-gap: 12px;
-  width: min(100%, 490px);
-  padding: 20px;
+.modal-content {
+  width: min(100%, 480px);
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 23px;
   border: 1px solid #ead1d1;
-  border-radius: 13px;
+  border-radius: 12px;
   background: #fff6f3;
   box-shadow: 0 12px 35px rgb(40 0 0 / 20%);
 }
 
-.warning-icon {
-  display: flex;
-  grid-row: span 2;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  background: #e9c4c5;
-  color: #650b13;
-  font-size: 27px;
-  font-weight: 700;
-}
-
-.warning-icon.danger {
-  background: #f4c6c6;
-  color: #c90000;
-}
-
-.warning-icon.returned {
-  background: #b9dfc7;
-  color: #245c3b;
-}
-
-.confirmation-modal h2 {
-  margin: 0;
+.modal-content h2 {
+  margin: 0 0 7px;
+  color: #39070a;
   font-family: Georgia, 'Times New Roman', serif;
-  font-size: 21px;
-  font-weight: 500;
+  font-size: 22px;
 }
 
-.confirmation-message {
-  grid-column: 1 / -1;
-  margin: 13px 0 18px;
-  color: #553638;
+.modal-description {
+  margin: 0 0 17px;
+  color: #795f60;
   font-size: 12px;
   line-height: 1.5;
 }
 
-.modal-error {
-  grid-column: 1 / -1;
-  margin: 0 0 15px;
+.modal-content form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-.confirmation-actions {
-  grid-column: 1 / -1;
+.modal-content label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #542d30;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.modal-content input {
+  width: 100%;
+  min-height: 37px;
+  padding: 8px 10px;
+  border: 1px solid #bd9194;
+  border-radius: 6px;
+  outline: none;
+  background: white;
+  color: #39070a;
+  font-size: 12px;
+}
+
+.modal-content input:focus {
+  border-color: #570910;
+}
+
+.modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+  margin-top: 12px;
 }
 
-.confirm-button {
-  min-width: 115px;
+.confirmation-modal {
+  max-width: 420px;
 }
 
-.confirm-button.confirm-reject {
-  border-color: #c90000;
-  background: #c90000;
+.confirmation-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  margin-bottom: 14px;
+  border-radius: 50%;
+  background: #ead6d7;
+  color: #570910;
+  font-size: 25px;
+  font-weight: bold;
 }
 
-.confirm-button.confirm-return {
-  border-color: #28744b;
-  background: #28744b;
-}
-
-.visually-hidden {
-  position: absolute;
-  overflow: hidden;
-  width: 1px;
-  height: 1px;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-}
-
-@media (max-width: 800px) {
+@media (max-width: 700px) {
   .books-page {
-    padding: 18px 13px 30px;
-  }
-
-  .request-row,
-  .borrowed-row {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .request-actions,
-  .loan-actions {
-    align-self: flex-end;
-  }
-
-  .catalog-table-wrap {
-    overflow-x: auto;
-  }
-
-  .catalog-table {
-    min-width: 700px;
-  }
-}
-
-@media (max-width: 420px) {
-  .tab-button {
-    padding: 0 12px;
-    font-size: 11px;
-  }
-
-  .catalog-toolbar {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .confirmation-modal {
-    grid-template-columns: 34px minmax(0, 1fr);
-    gap: 10px;
     padding: 15px;
   }
 
-  .warning-icon {
-    width: 34px;
-    height: 34px;
+  .catalog-toolbar {
+    flex-wrap: wrap;
   }
 
-  .confirmation-modal h2 {
-    font-size: 17px;
+  .search-input {
+    flex-basis: 100%;
+  }
+
+  .data-table {
+    min-width: 750px;
+  }
+
+  .tab-button {
+    padding: 9px 12px;
   }
 }
 </style>

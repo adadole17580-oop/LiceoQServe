@@ -1,43 +1,159 @@
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
+import { supabase } from '../lib/Supabase.js'
 
-const recentWorks = ref([
-  {
-    name: 'Rainier Amparo',
-    type: 'Book Borrowing',
-    code: 'LIB-018',
-    status: 'Processing',
-    date: 'October 27, 2026',
-    description: 'Book borrowing request submitted for library processing.',
-    details: {
-      'Student Name': 'Rainier Amparo',
-      'Request Type': 'Book Borrowing',
-      'Reference Number': 'LIB-018',
-      'Current Status': 'Processing',
-      'Request Date': 'October 27, 2026',
-      'Purpose': 'Book borrowing',
-    },
-  },
-  {
-    name: 'Chloe Monteza',
-    type: 'Clearance Signing',
-    code: 'CLR-011',
-    status: 'Processing',
-    date: 'October 27, 2026',
-    description: 'Clearance signing request submitted for processing.',
-    details: {
-      'Student Name': 'Chloe Monteza',
-      'Request Type': 'Clearance Signing',
-      'Reference Number': 'CLR-011',
-      'Current Status': 'Processing',
-      'Request Date': 'October 27, 2026',
-      'Purpose': 'Library clearance signing',
-    },
-  },
-])
+const LIBRARY_SERVICE_ID = '99a740ad-96d7-43a5-9bcc-3f9723cabd28'
 
+const recentWorks = ref([])
 const selectedWork = ref(null)
+const loading = ref(false)
+const errorMessage = ref('')
+
+let realtimeChannel = null
+
+function formatDate(value) {
+  if (!value) return 'Not available'
+
+  return new Date(value).toLocaleString('en-PH', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  })
+}
+
+function statusLabel(status) {
+  const labels = {
+    pending: 'Pending',
+    processing: 'Processing',
+    ready_for_pickup: 'Ready for Pickup',
+    claimed: 'Approved',
+    borrowed: 'Borrowed',
+    completed: 'Completed',
+    returned: 'Returned',
+    rejected: 'Rejected',
+    cancelled: 'Cancelled',
+  }
+
+  return labels[String(status || '').toLowerCase()] || status || 'Unknown'
+}
+
+async function fetchRecentWork() {
+  loading.value = true
+  errorMessage.value = ''
+
+  try {
+    // Fetch Library requests
+    const { data: requests, error: requestError } = await supabase
+      .from('service_requests')
+      .select('*')
+      .eq('service_id', LIBRARY_SERVICE_ID)
+      .order('submitted_at', { ascending: false })
+      .limit(10)
+
+    if (requestError) throw requestError
+
+    // Fetch borrowed and returned books
+    const { data: loans, error: loanError } = await supabase
+      .from('book_loans')
+      .select('*')
+      .order('borrowed_at', { ascending: false })
+      .limit(10)
+
+    if (loanError) throw loanError
+
+    // Get related book information
+    const bookIds = [
+      ...new Set([
+        ...(requests || []).map(item => item.book_id),
+        ...(loans || []).map(item => item.book_id),
+      ].filter(Boolean)),
+    ]
+
+    let books = []
+
+    if (bookIds.length) {
+      const { data, error } = await supabase
+        .from('library_books')
+        .select('*')
+        .in('id', bookIds)
+
+      if (error) throw error
+      books = data || []
+    }
+
+    const bookMap = Object.fromEntries(
+      books.map(book => [book.id, book])
+    )
+
+    const requestActivities = (requests || []).map(request => {
+      const book = bookMap[request.book_id]
+      const bookTitle =
+        book?.title ||
+        request.selected_book ||
+        request.title ||
+        'Library Request'
+
+      return {
+        code: `REQ-${String(request.id).slice(0, 8)}`,
+        name: bookTitle,
+        type: request.request_type || 'Library Request',
+        status: statusLabel(request.status),
+        date: request.submitted_at,
+        description:
+          request.details ||
+          'A Library service request was submitted.',
+        details: {
+          'Request ID': request.id,
+          'Request Title': request.title || 'Not available',
+          'Book': bookTitle,
+          'Student ID': request.student_id || 'Not available',
+          'Request Type': request.request_type || 'Not available',
+          'Status': statusLabel(request.status),
+          'Submitted At': formatDate(request.submitted_at),
+          'Staff Notes': request.staff_notes || 'None',
+        },
+      }
+    })
+
+    const loanActivities = (loans || []).map(loan => {
+      const book = bookMap[loan.book_id]
+      const bookTitle = book?.title || 'Library Book'
+
+      return {
+        code: `LOAN-${String(loan.id).slice(0, 8)}`,
+        name: bookTitle,
+        type: 'Book Loan',
+        status: statusLabel(loan.status),
+        date: loan.borrowed_at,
+        description: 'Library book loan record.',
+        details: {
+          'Loan ID': loan.id,
+          'Book': bookTitle,
+          'Student ID': loan.student_id || 'Not available',
+          'Borrowed At': formatDate(loan.borrowed_at),
+          'Due Date': formatDate(loan.due_at),
+          'Loan Status': statusLabel(loan.status),
+          'Source Request': loan.source_request_id || 'Not available',
+        },
+      }
+    })
+
+    recentWorks.value = [
+      ...requestActivities,
+      ...loanActivities,
+    ]
+      .sort((a, b) => {
+        return new Date(b.date || 0) - new Date(a.date || 0)
+      })
+      .slice(0, 10)
+
+  } catch (error) {
+    console.error('Error fetching recent work:', error)
+    errorMessage.value = error.message || 'Unable to load recent work.'
+  } finally {
+    loading.value = false
+  }
+}
 
 function viewDetails(work) {
   selectedWork.value = work
@@ -46,36 +162,91 @@ function viewDetails(work) {
 function closeDetails() {
   selectedWork.value = null
 }
+
+onMounted(() => {
+  fetchRecentWork()
+
+  realtimeChannel = supabase
+    .channel('library-recent-work')
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'service_requests',
+        filter: `service_id=eq.${LIBRARY_SERVICE_ID}`,
+      },
+      () => fetchRecentWork()
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'book_loans',
+      },
+      () => fetchRecentWork()
+    )
+    .subscribe()
+})
+
+onUnmounted(() => {
+  if (realtimeChannel) {
+    supabase.removeChannel(realtimeChannel)
+  }
+})
 </script>
 
 <template>
   <section class="activity-card">
-    <h2>Recent Work</h2>
-
-    <div
-      v-for="work in recentWorks"
-      :key="work.code"
-      class="work-row"
-    >
-      <div class="details">
-        <strong>{{ work.name }} · {{ work.type }}</strong>
-        <span>{{ work.code }}</span>
-      </div>
-
-      <span class="status">{{ work.status }}</span>
+    <div class="card-heading">
+      <h2>Recent Work</h2>
 
       <button
         type="button"
-        class="view-button"
-        @click="viewDetails(work)"
+        class="refresh-button"
+        @click="fetchRecentWork"
+        :disabled="loading"
       >
-        View Details
+        {{ loading ? 'Loading...' : 'Refresh' }}
       </button>
     </div>
 
-    <p v-if="recentWorks.length === 0" class="empty-message">
-      No recent work available.
+    <div v-if="loading && recentWorks.length === 0" class="empty-message">
+      Loading recent activities...
+    </div>
+
+    <p v-else-if="errorMessage" class="error-message">
+      {{ errorMessage }}
     </p>
+
+    <template v-else>
+      <div
+        v-for="work in recentWorks"
+        :key="work.code"
+        class="work-row"
+      >
+        <div class="details">
+          <strong>{{ work.name }} · {{ work.type }}</strong>
+          <span>{{ work.code }}</span>
+          <span>{{ formatDate(work.date) }}</span>
+        </div>
+
+        <span class="status">{{ work.status }}</span>
+
+        <button
+          type="button"
+          class="view-button"
+          @click="viewDetails(work)"
+        >
+          View Details
+        </button>
+      </div>
+
+      <p v-if="recentWorks.length === 0" class="empty-message">
+        No recent work available.
+      </p>
+    </template>
 
     <!-- DETAILS MODAL -->
     <div
@@ -159,9 +330,32 @@ function closeDetails() {
   color: #390607;
 }
 
+.card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
 h2 {
-  margin: 0 0 14px;
+  margin: 0;
   font: bold 24px Georgia, serif;
+}
+
+.refresh-button {
+  padding: 6px 10px;
+  border: 1px solid #570910;
+  border-radius: 6px;
+  background: white;
+  color: #570910;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.refresh-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .work-row {
@@ -370,6 +564,14 @@ h2 {
   color: #795b5d;
   font-size: 12px;
   text-align: center;
+}
+
+.error-message {
+  padding: 14px;
+  border-radius: 8px;
+  background: #fbe4e4;
+  color: #9b1c1c;
+  font-size: 12px;
 }
 
 @media (max-width: 480px) {

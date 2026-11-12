@@ -7,7 +7,6 @@ import RequestCard from '../components/RequestCard.vue'
 import RequestDetails from '../components/RequestDetails.vue'
 import StatusConfirmModal from '../components/StatusConfirmModal.vue'
 
-// LIBRARY OFFICE SERVICE IDs
 const LIBRARY_SERVICE_IDS = [
   '987d7769-8a02-44a1-9b95-cdfec559a70e',
   'faa4239d-cae7-4fe7-af69-3f25bec2fe44',
@@ -17,18 +16,12 @@ const LIBRARY_SERVICE_IDS = [
   '2e171fa5-701e-4e91-9d3a-a99214dfce59',
 ]
 
-const filters = [
-  'All',
-  'Pending',
-  'Processing',
-  'Completed',
-  'Cancelled',
-]
+const filters = ['All', 'For Confirmation', 'Confirmed', 'Cancelled']
 
 const activeFilter = ref('All')
 const selectedRequestId = ref(null)
 const showStatusModal = ref(false)
-const pendingStatus = ref('Pending')
+const pendingStatus = ref('Confirm')
 const searchQuery = ref('')
 const notice = ref('')
 const requests = ref([])
@@ -38,28 +31,21 @@ const errorMessage = ref('')
 
 let requestSubscription = null
 
-// DATABASE STATUS TO DISPLAY STATUS
 function formatStatus(status) {
   const normalized = String(status || '').toLowerCase()
 
-  if (normalized === 'pending') return 'Pending'
-  if (normalized === 'processing') return 'Processing'
-  if (normalized === 'completed') return 'Completed'
-  if (normalized === 'cancelled') return 'Cancelled'
+  if (normalized === 'borrowed') return 'Confirmed'
 
   if (
-    normalized === 'ready_for_pickup' ||
-    normalized === 'claimed'
+    normalized === 'cancelled' ||
+    normalized === 'rejected'
   ) {
-    return 'Processing'
+    return 'Cancelled'
   }
 
-  if (normalized === 'rejected') return 'Cancelled'
-
-  return 'Pending'
+  return 'For Confirmation'
 }
 
-// FETCH REQUESTS FROM SUPABASE
 async function fetchRequests() {
   loading.value = true
   errorMessage.value = ''
@@ -127,11 +113,11 @@ async function fetchRequests() {
       }
     })
 
-    const selectedStillExists = requests.value.some(
-      (request) => request.id === selectedRequestId.value,
-    )
-
-    if (!selectedStillExists) {
+    if (
+      !requests.value.some(
+        (request) => request.id === selectedRequestId.value,
+      )
+    ) {
       selectedRequestId.value = requests.value[0]?.id || null
     }
   } catch (error) {
@@ -143,14 +129,12 @@ async function fetchRequests() {
   }
 }
 
-// SELECTED REQUEST
 const selectedRequest = computed(() =>
   requests.value.find(
     (request) => request.id === selectedRequestId.value,
   ) || null,
 )
 
-// FILTER AND SEARCH
 const filteredRequests = computed(() => {
   const query = searchQuery.value.trim().toLowerCase()
 
@@ -174,72 +158,26 @@ const filteredRequests = computed(() => {
   })
 })
 
-// SELECT REQUEST
 function selectRequest(request) {
   selectedRequestId.value = request.id
   notice.value = ''
 }
 
-// SAVE EXPECTED DATE AND INSTRUCTIONS
-async function saveRequest(updatedRequest) {
-  if (!updatedRequest?.id || saving.value) return
-
-  saving.value = true
-  notice.value = ''
-
-  try {
-    const { data: authData, error: authError } =
-      await supabase.auth.getUser()
-
-    if (authError) throw authError
-
-    const userId = authData.user?.id
-
-    const updateData = {
-      expected_completion:
-        updatedRequest.expectedDate || null,
-      instructions:
-        updatedRequest.instruction?.trim() || null,
-      updated_at: new Date().toISOString(),
-    }
-
-    if (userId) {
-      updateData.handled_by = userId
-    }
-
-    const { error } = await supabase
-      .from('service_requests')
-      .update(updateData)
-      .eq('id', updatedRequest.id)
-
-    if (error) throw error
-
-    notice.value = 'Request details saved successfully.'
-
-    await fetchRequests()
-  } catch (error) {
-    console.error('Error saving request:', error)
-    notice.value =
-      error.message || 'Failed to save request details.'
-  } finally {
-    saving.value = false
-  }
-}
-
-// OPEN STATUS CONFIRMATION
-function askForStatusChange(status) {
+function askForStatusChange(action, formData = null) {
   if (!selectedRequest.value) return
 
-  if (selectedRequest.value.status === status) {
-    notice.value = `This request is already ${status.toLowerCase()}.`
+  if (selectedRequest.value.databaseStatus !== 'pending') {
+    notice.value = 'This request has already been handled.'
     return
   }
 
-  pendingStatus.value = status
+  pendingStatus.value = action
+  confirmationForm.value = formData
   showStatusModal.value = true
 }
 
-// UPDATE REQUEST STATUS IN SUPABASE
+const confirmationForm = ref(null)
+
 async function confirmStatusChange() {
   if (!selectedRequest.value || saving.value) return
 
@@ -247,6 +185,8 @@ async function confirmStatusChange() {
   notice.value = ''
 
   try {
+    const requestId = selectedRequest.value.id
+
     const { data: authData, error: authError } =
       await supabase.auth.getUser()
 
@@ -254,67 +194,84 @@ async function confirmStatusChange() {
 
     const userId = authData.user?.id
 
-    const databaseStatus = {
-      Pending: 'pending',
-      Processing: 'processing',
-      Completed: 'completed',
-      Cancelled: 'cancelled',
-    }[pendingStatus.value]
+    if (pendingStatus.value === 'Confirm') {
+      if (!confirmationForm.value) {
+        throw new Error('Please provide the confirmation details.')
+      }
 
-    const updateData = {
-      status: databaseStatus,
-      updated_at: new Date().toISOString(),
-      completed_at:
-        pendingStatus.value === 'Completed'
-          ? new Date().toISOString()
-          : null,
+      // Save Expected Completion and Instructions first.
+      const { data: updatedRequest, error: updateError } =
+        await supabase
+          .from('service_requests')
+          .update({
+            expected_completion:
+              confirmationForm.value.expectedDate || null,
+            instructions:
+              confirmationForm.value.instruction?.trim() || null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', requestId)
+          .eq('status', 'pending')
+          .select('id')
+
+      if (updateError) throw updateError
+
+      if (!updatedRequest?.length) {
+        throw new Error('Request was already handled.')
+      }
+
+      // Run the existing book approval RPC.
+      const { error: rpcError } = await supabase.rpc(
+        'approve_library_borrow_request',
+        {
+          p_request_id: requestId,
+        },
+      )
+
+      if (rpcError) throw rpcError
+
+      notice.value = 'Book request confirmed successfully.'
+    } else if (pendingStatus.value === 'Cancel') {
+      const { data, error } = await supabase
+        .from('service_requests')
+        .update({
+          status: 'cancelled',
+          handled_by: userId,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', requestId)
+        .eq('status', 'pending')
+        .select('id')
+
+      if (error) throw error
+
+      if (!data?.length) {
+        throw new Error(
+          'Request was already handled or could not be cancelled.',
+        )
+      }
+
+      notice.value = 'Book request cancelled successfully.'
     }
-
-    if (userId) {
-      updateData.handled_by = userId
-    }
-
-    const { error } = await supabase
-      .from('service_requests')
-      .update(updateData)
-      .eq('id', selectedRequest.value.id)
-
-    if (error) throw error
 
     showStatusModal.value = false
-    notice.value = `Request status changed to ${pendingStatus.value}.`
+    confirmationForm.value = null
 
     await fetchRequests()
   } catch (error) {
-    console.error('Error updating request status:', error)
-    notice.value =
-      error.message || 'Failed to update request status.'
+    console.error('Error handling request:', error)
+    notice.value = error.message || 'Failed to process request.'
   } finally {
     saving.value = false
   }
 }
 
-// CLOSE STATUS MODAL
 function closeStatusModal() {
   if (saving.value) return
+
   showStatusModal.value = false
 }
 
-// FORMAT DATE
-function formatDate(date) {
-  if (!date) return 'Not set'
-
-  return new Date(`${date}T12:00:00`).toLocaleDateString(
-    'en-US',
-    {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    },
-  )
-}
-
-// REALTIME REFRESH
 function subscribeToRequests() {
   requestSubscription = supabase
     .channel('library-service-requests')
@@ -325,9 +282,7 @@ function subscribeToRequests() {
         schema: 'public',
         table: 'service_requests',
       },
-      () => {
-        fetchRequests()
-      },
+      () => fetchRequests(),
     )
     .subscribe()
 }
@@ -351,7 +306,7 @@ onUnmounted(() => {
         <p class="eyebrow">LIBRARY MANAGEMENT</p>
         <h1>Requests</h1>
         <p class="subtitle">
-          Manage student requests, track progress, and update status.
+          Review and manage student book requests.
         </p>
       </div>
 
@@ -395,7 +350,7 @@ onUnmounted(() => {
           />
         </label>
 
-        <div class="filter-list" aria-label="Filter requests">
+        <div class="filter-list">
           <button
             v-for="filter in filters"
             :key="filter"
@@ -405,14 +360,13 @@ onUnmounted(() => {
             @click="activeFilter = filter"
           >
             {{ filter }}
-            <span v-if="filter === 'All'">
-              {{ requests.length }}
-            </span>
-            <span v-else>
+            <span>
               {{
-                requests.filter(
-                  (request) => request.status === filter,
-                ).length
+                filter === 'All'
+                  ? requests.length
+                  : requests.filter(
+                      (request) => request.status === filter,
+                    ).length
               }}
             </span>
           </button>
@@ -441,7 +395,7 @@ onUnmounted(() => {
             {{
               requests.length === 0
                 ? 'No Library requests have been submitted yet.'
-                : 'Try another status filter or search term.'
+                : 'Try another filter or search term.'
             }}
           </p>
         </div>
@@ -450,59 +404,16 @@ onUnmounted(() => {
       <div class="request-details-column">
         <RequestDetails
           :request="selectedRequest"
-          @save="saveRequest"
           @change-status="askForStatusChange"
           @close="selectedRequestId = null"
         />
-
-        <section
-          v-if="selectedRequest"
-          class="timeline-panel"
-        >
-          <h2>Request overview</h2>
-
-          <div class="timeline-row">
-            <span class="timeline-dot"></span>
-            <div>
-              <strong>Request submitted</strong>
-              <p>{{ formatDate(selectedRequest.requestDate) }}</p>
-            </div>
-          </div>
-
-          <div class="timeline-row">
-            <span
-              class="timeline-dot"
-              :class="{
-                completed:
-                  selectedRequest.status === 'Processing' ||
-                  selectedRequest.status === 'Completed',
-              }"
-            ></span>
-            <div>
-              <strong>Current status</strong>
-              <p>{{ selectedRequest.status }}</p>
-            </div>
-          </div>
-
-          <div class="timeline-row">
-            <span
-              class="timeline-dot"
-              :class="{
-                completed: selectedRequest.status === 'Completed',
-              }"
-            ></span>
-            <div>
-              <strong>Expected completion</strong>
-              <p>{{ formatDate(selectedRequest.expectedDate) }}</p>
-            </div>
-          </div>
-        </section>
       </div>
     </section>
 
     <StatusConfirmModal
       :show="showStatusModal"
       :status="pendingStatus"
+      :loading="saving"
       @confirm="confirmStatusChange"
       @cancel="closeStatusModal"
     />
@@ -511,21 +422,26 @@ onUnmounted(() => {
 
 <style scoped>
 .requests-page {
-  flex: 1;
+  width: 100%;
   min-width: 0;
   min-height: calc(100vh - 104px);
-  padding: 28px;
+  padding: clamp(12px, 2vw, 28px);
+  box-sizing: border-box;
   background: #eadcda;
   color: #390607;
-  box-sizing: border-box;
   font-family: Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 .page-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 20px;
+  flex-wrap: wrap;
+  gap: 16px;
   margin-bottom: 24px;
 }
 
@@ -534,13 +450,13 @@ onUnmounted(() => {
   color: #805d5e;
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 1.5px;
+  letter-spacing: 1.3px;
 }
 
-h1 {
+.page-header h1 {
   margin: 0;
   font-family: Georgia, serif;
-  font-size: 32px;
+  font-size: clamp(23px, 2vw, 32px);
 }
 
 .subtitle {
@@ -554,8 +470,8 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 7px;
-  min-width: 105px;
-  padding: 14px 17px;
+  min-width: 100px;
+  padding: 13px 16px;
   border: 1px solid #d5bdbc;
   border-radius: 10px;
   background: #f8eeee;
@@ -568,45 +484,35 @@ h1 {
 
 .request-total strong {
   font-family: Georgia, serif;
-  font-size: 26px;
+  font-size: 25px;
 }
 
-.notice {
+.notice,
+.error-message {
   display: flex;
-  align-items: center;
   justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 16px;
   padding: 12px 15px;
-  border: 1px solid #c6d9bf;
   border-radius: 8px;
-  background: #edf5e9;
-  color: #315a2e;
   font-size: 12px;
 }
 
-.notice button {
-  border: 0;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  font-size: 20px;
+.notice {
+  border: 1px solid #c6d9bf;
+  background: #edf5e9;
+  color: #315a2e;
 }
 
 .error-message {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
-  padding: 12px 15px;
   border: 1px solid #d8aaaa;
-  border-radius: 8px;
   background: #fceaea;
   color: #8a1717;
-  font-size: 12px;
 }
 
+.notice button,
 .error-message button {
   border: 0;
   background: transparent;
@@ -617,15 +523,16 @@ h1 {
 
 .requests-workspace {
   display: grid;
-  grid-template-columns: minmax(260px, 0.95fr) minmax(0, 1.2fr);
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.2fr);
   align-items: start;
-  gap: 20px;
+  gap: clamp(12px, 1.5vw, 20px);
+  width: 100%;
+  min-width: 0;
 }
 
-.request-list-panel,
-.timeline-panel {
+.request-list-panel {
   min-width: 0;
-  padding: 18px;
+  padding: clamp(12px, 1.5vw, 18px);
   border: 1px solid #d5bdbc;
   border-radius: 12px;
   background: #f6eded;
@@ -635,12 +542,12 @@ h1 {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-bottom: 15px;
 }
 
-.list-heading h2,
-.timeline-panel h2 {
+.list-heading h2 {
   margin: 0;
   font-family: Georgia, serif;
   font-size: 17px;
@@ -653,12 +560,13 @@ h1 {
 
 .search-box {
   display: block;
+  width: 100%;
   margin-bottom: 14px;
 }
 
 .search-box input {
   width: 100%;
-  box-sizing: border-box;
+  min-width: 0;
   padding: 11px;
   border: 1px solid #d5bdbc;
   border-radius: 7px;
@@ -677,7 +585,9 @@ h1 {
 .filter-list button {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
+  max-width: 100%;
   padding: 7px 9px;
   border: 1px solid #d5bdbc;
   border-radius: 7px;
@@ -685,11 +595,6 @@ h1 {
   color: #5f3839;
   cursor: pointer;
   font-size: 10px;
-}
-
-.filter-list button span {
-  font-size: 9px;
-  opacity: 0.8;
 }
 
 .filter-list button.active {
@@ -702,6 +607,12 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-width: 0;
+}
+
+.request-details-column {
+  min-width: 0;
+  width: 100%;
 }
 
 .empty-list {
@@ -718,53 +629,6 @@ h1 {
   font-size: 11px;
 }
 
-.request-details-column {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  min-width: 0;
-}
-
-.timeline-panel h2 {
-  margin-bottom: 20px;
-}
-
-.timeline-row {
-  position: relative;
-  display: flex;
-  gap: 12px;
-  padding-bottom: 20px;
-}
-
-.timeline-row:last-child {
-  padding-bottom: 0;
-}
-
-.timeline-dot {
-  flex-shrink: 0;
-  width: 10px;
-  height: 10px;
-  margin-top: 3px;
-  border: 2px solid #9c7778;
-  border-radius: 50%;
-  background: #f6eded;
-}
-
-.timeline-dot.completed {
-  border-color: #276d39;
-  background: #276d39;
-}
-
-.timeline-row strong {
-  font-size: 11px;
-}
-
-.timeline-row p {
-  margin: 5px 0 0;
-  color: #795f60;
-  font-size: 10px;
-}
-
 .sr-only {
   position: absolute;
   width: 1px;
@@ -777,33 +641,49 @@ h1 {
   border: 0;
 }
 
-@media (max-width: 1050px) {
+@media (max-width: 1100px) {
   .requests-workspace {
     grid-template-columns: minmax(0, 1fr);
   }
 }
 
-@media (max-width: 700px) {
+@media (max-width: 768px) {
   .requests-page {
-    padding: 18px 12px;
+    padding: 16px;
   }
 
   .page-header {
     align-items: flex-start;
   }
 
-  h1 {
-    font-size: 27px;
+  .request-total {
+    min-width: 85px;
   }
 
-  .request-total {
-    min-width: 75px;
+  .requests-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .requests-page {
     padding: 10px;
   }
 
-  .request-list-panel,
-  .timeline-panel {
-    padding: 12px;
+  .page-header h1 {
+    font-size: 24px;
+  }
+
+  .request-total {
+    width: 100%;
+  }
+
+  .request-list-panel {
+    padding: 11px;
+  }
+
+  .filter-list button {
+    flex: 1 1 auto;
   }
 }
 </style>

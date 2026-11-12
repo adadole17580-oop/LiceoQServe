@@ -1,17 +1,33 @@
 
 <script setup>
-defineProps({
+import { computed } from 'vue'
+
+const props = defineProps({
   show: {
     type: Boolean,
     default: false,
   },
   status: {
     type: String,
-    default: 'Pending',
+    default: 'Confirm',
   },
 })
 
 defineEmits(['confirm', 'cancel'])
+
+const isConfirm = computed(() => props.status === 'Confirm')
+
+const modalTitle = computed(() =>
+  isConfirm.value
+    ? 'Confirm this Book Request?'
+    : 'Cancel this Book Request?',
+)
+
+const modalMessage = computed(() =>
+  isConfirm.value
+    ? 'This will confirm the request, create a book loan record, and update the available book copies.'
+    : 'Are you sure you want to cancel this request? This action will not create a book loan.',
+)
 </script>
 
 <template>
@@ -20,23 +36,18 @@ defineEmits(['confirm', 'cancel'])
       v-if="show"
       class="modal-overlay"
       @click.self="$emit('cancel')"
-      @keydown.esc="$emit('cancel')"
     >
       <section
         class="confirmation-modal"
         role="dialog"
         aria-modal="true"
-        :aria-label="`Change status to ${status}?`"
+        :aria-label="modalTitle"
       >
         <div class="warning-icon">!</div>
 
         <div class="modal-content">
-          <h2>Change Status to {{ status }}?</h2>
-
-          <p>
-            The request timeline will update and the student
-            will receive a notification.
-          </p>
+          <h2>{{ modalTitle }}</h2>
+          <p>{{ modalMessage }}</p>
 
           <div class="modal-actions">
             <button
@@ -47,10 +58,10 @@ defineEmits(['confirm', 'cancel'])
             </button>
 
             <button
-              class="confirm-button"
+              :class="isConfirm ? 'confirm-button' : 'cancel-button'"
               @click="$emit('confirm')"
             >
-              Confirm status change
+              {{ isConfirm ? 'Confirm Request' : 'Cancel Request' }}
             </button>
           </div>
         </div>
@@ -135,8 +146,14 @@ button {
 }
 
 .confirm-button {
-  border: 1px solid #56090d;
-  background: #56090d;
+  border: 1px solid #16803c;
+  background: #16803c;
+  color: white;
+}
+
+.cancel-button {
+  border: 1px solid #a32626;
+  background: #a32626;
   color: white;
 }
 

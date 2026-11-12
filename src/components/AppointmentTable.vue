@@ -9,14 +9,14 @@ defineProps({
 
 const emit = defineEmits([
   'view',
+  'confirm',
   'complete',
   'cancel',
-  'no-show',
   'reschedule',
 ])
 
 function statusClass(status) {
-  return status.toLowerCase().replace(/\s+/g, '-')
+  return String(status || '').toLowerCase().replace(/\s+/g, '-')
 }
 </script>
 
@@ -24,7 +24,7 @@ function statusClass(status) {
   <div class="appointment-list">
     <article
       v-for="item in appointments"
-      :key="item.id"
+      :key="item.appointmentId || item.id"
       class="appointment-card"
     >
       <div class="card-top">
@@ -41,33 +41,33 @@ function statusClass(status) {
       <p class="appointment-id">{{ item.id }}</p>
 
       <div class="actions">
-        <button type="button" @click="emit('reschedule', item)">
-          Reschedule
-        </button>
+        <template v-if="['Pending', 'Reschedule Requested'].includes(item.status)">
+          <button type="button" @click="emit('reschedule', item)">
+            Reschedule
+          </button>
 
-        <button
-          v-if="!['Completed', 'Cancelled', 'No-show'].includes(item.status)"
-          type="button"
-          @click="emit('complete', item)"
-        >
-          Complete
-        </button>
+          <button type="button" @click="emit('confirm', item)">
+            Confirm
+          </button>
 
-        <button
-          v-if="!['Completed', 'Cancelled', 'No-show'].includes(item.status)"
-          type="button"
-          @click="emit('cancel', item)"
-        >
-          Cancel
-        </button>
+          <button type="button" @click="emit('cancel', item)">
+            Cancel
+          </button>
+        </template>
 
-        <button
-          v-if="!['Completed', 'Cancelled', 'No-show'].includes(item.status)"
-          type="button"
-          @click="emit('no-show', item)"
-        >
-          No-show
-        </button>
+        <template v-else-if="item.status === 'Confirmed'">
+          <button type="button" @click="emit('reschedule', item)">
+            Reschedule
+          </button>
+
+          <button type="button" @click="emit('complete', item)">
+            Complete
+          </button>
+
+          <button type="button" @click="emit('cancel', item)">
+            Cancel
+          </button>
+        </template>
 
         <button type="button" @click="emit('view', item)">
           View
@@ -130,8 +130,7 @@ function statusClass(status) {
   color: #21496e;
 }
 
-.status-badge.cancelled,
-.status-badge.no-show {
+.status-badge.cancelled {
   background: #f2cccc;
   color: #9a0000;
 }

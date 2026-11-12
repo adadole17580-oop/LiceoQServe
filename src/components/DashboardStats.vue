@@ -3,7 +3,17 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { supabase } from '../lib/Supabase.js'
 
-const todayAppointments = ref([])
+// LIBRARY SERVICE IDS
+const LIBRARY_SERVICE_IDS = [
+  '11153e05-a183-48cd-83b0-12e46d921915',
+  '2e171fa5-701e-4e91-9d3a-a99214dfce59',
+  '987d7769-8a02-44a1-9b95-cdfec559a70e',
+  '99a740ad-96d7-43a5-9bcc-3f9723cabd28',
+  'be4db8a9-3ac2-41ae-ba72-5e96a3034512',
+  'faa4239d-cae7-4fe7-af69-3f25bec2fe44'
+]
+
+const todayTransactions = ref([])
 const pendingRequests = ref([])
 const overdueLoans = ref([])
 const roomReservations = ref([])
@@ -16,17 +26,18 @@ const selectedStat = ref(null)
 let realtimeChannel = null
 let refreshTimeout = null
 
+// DASHBOARD STATISTICS
 const stats = computed(() => [
   {
     title: "TODAY'S TRANSACTION",
-    count: todayAppointments.value.length,
-    subtitle: 'Appointments created today',
+    count: todayTransactions.value.length,
+    subtitle: 'Library transactions submitted today',
     type: 'transactions'
   },
   {
     title: 'PENDING REQUESTS',
     count: pendingRequests.value.length,
-    subtitle: 'Requests awaiting action',
+    subtitle: 'Library requests awaiting action',
     type: 'requests'
   },
   {
@@ -43,32 +54,47 @@ const stats = computed(() => [
   }
 ])
 
-const todayDate = () => {
-  const parts = new Intl.DateTimeFormat('en-CA', {
+// GET CURRENT DATE IN PHILIPPINE TIME
+function todayDate() {
+  return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Manila',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit'
-  }).formatToParts(new Date())
-
-  const year = parts.find(p => p.type === 'year').value
-  const month = parts.find(p => p.type === 'month').value
-  const day = parts.find(p => p.type === 'day').value
-
-  return `${year}-${month}-${day}`
+  }).format(new Date())
 }
 
-const getStudentName = (studentId) => {
+// CHECK IF DATE IS TODAY
+function isToday(dateValue) {
+  if (!dateValue) return false
+
+  const parsed = new Date(dateValue)
+
+  if (Number.isNaN(parsed.getTime())) return false
+
+  const manilaDate = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(parsed)
+
+  return manilaDate === todayDate()
+}
+
+// GET STUDENT NAME
+function getStudentName(studentId) {
   if (!studentId) return 'Not available'
 
   const profile = profiles.value.find(
     p => p.id === studentId || p.student_id === studentId
   )
 
-  return profile?.full_name || profile?.name || 'Not available'
+  return profile?.full_name || 'Not available'
 }
 
-const formatDate = (date) => {
+// FORMAT DATE
+function formatDate(date) {
   if (!date) return 'Not available'
 
   const parsed = new Date(date)
@@ -85,38 +111,47 @@ const formatDate = (date) => {
   })
 }
 
-const normalizeStatus = (status) => {
+// FORMAT STATUS
+function normalizeStatus(status) {
   return String(status || 'Pending')
     .replaceAll('_', ' ')
     .replace(/\b\w/g, letter => letter.toUpperCase())
 }
 
-const fetchDashboardData = async () => {
+// FETCH DASHBOARD DATA
+async function fetchDashboardData() {
   if (loading.value) return
 
   loading.value = true
 
   try {
-    // CHECK CURRENT LOGGED-IN ACCOUNT
-    const { data: authData, error: authError } =
-      await supabase.auth.getUser()
-
-    console.log('AUTH USER:', authData?.user?.id)
-    console.log('AUTH EMAIL:', authData?.user?.email)
-    console.log('AUTH ERROR:', authError)
-
-    // FETCH DASHBOARD TABLES
     const results = await Promise.all([
-      supabase.from('appointments').select('*'),
-      supabase.from('registrar_requests').select('*'),
-      supabase.from('book_loans').select('*'),
-      supabase.from('reservations').select('*'),
-      supabase.from('profiles').select('*')
+      supabase
+        .from('appointments')
+        .select('*')
+        .in('service_id', LIBRARY_SERVICE_IDS),
+
+      supabase
+        .from('service_requests')
+        .select('*')
+        .in('service_id', LIBRARY_SERVICE_IDS),
+
+      supabase
+        .from('book_loans')
+        .select('*'),
+
+      supabase
+        .from('reservations')
+        .select('*'),
+
+      supabase
+        .from('profiles')
+        .select('*')
     ])
 
     const tableNames = [
       'appointments',
-      'registrar_requests',
+      'service_requests',
       'book_loans',
       'reservations',
       'profiles'
@@ -139,7 +174,6 @@ const fetchDashboardData = async () => {
 
         console.log(
           `${tableName} records:`,
-          tableData[tableName].length,
           tableData[tableName]
         )
       }
@@ -148,31 +182,33 @@ const fetchDashboardData = async () => {
     profiles.value = tableData.profiles
 
     // TODAY'S TRANSACTIONS
-    const today = todayDate()
-
-    todayAppointments.value = tableData.appointments.filter(row => {
-      if (!row.created_at) return false
-
-      const createdDate = new Date(row.created_at)
-
-      if (Number.isNaN(createdDate.getTime())) return false
-
-      const manilaDate = new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'Asia/Manila',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit'
-      }).format(createdDate)
-
-      return manilaDate === today
+    // Include appointments created today OR scheduled today.
+    const todaysAppointments = tableData.appointments.filter(row => {
+      return (
+        isToday(row.created_at) ||
+        isToday(row.scheduled_at)
+      )
     })
 
-    // PENDING REQUESTS
-    pendingRequests.value = tableData.registrar_requests.filter(row => {
+    // Include service requests submitted today OR created today.
+    const todaysRequests = tableData.service_requests.filter(row => {
+      return (
+        isToday(row.submitted_at) ||
+        isToday(row.created_at)
+      )
+    })
+
+    todayTransactions.value = [
+      ...todaysAppointments,
+      ...todaysRequests
+    ]
+
+    // PENDING LIBRARY REQUESTS
+    pendingRequests.value = tableData.service_requests.filter(row => {
       return String(row.status || '').toLowerCase() === 'pending'
     })
 
-    // OVERDUE LOANS
+    // OVERDUE BOOK LOANS
     const currentDate = new Date()
 
     overdueLoans.value = tableData.book_loans.filter(row => {
@@ -204,8 +240,10 @@ const fetchDashboardData = async () => {
     // ROOM RESERVATIONS
     roomReservations.value = tableData.reservations
 
-    console.log('Dashboard successfully updated:', {
-      todayAppointments: todayAppointments.value.length,
+    console.log('LIBRARY DASHBOARD UPDATED:', {
+      todayTransactions: todayTransactions.value.length,
+      todaysAppointments: todaysAppointments.length,
+      todaysRequests: todaysRequests.length,
       pendingRequests: pendingRequests.value.length,
       overdueLoans: overdueLoans.value.length,
       roomReservations: roomReservations.value.length
@@ -218,38 +256,47 @@ const fetchDashboardData = async () => {
   }
 }
 
-// MODAL DETAILS
-const getRecords = (type) => {
+// GET RECORDS FOR DETAILS MODAL
+function getRecords(type) {
   switch (type) {
     case 'transactions':
-      return todayAppointments.value
+      return todayTransactions.value
+
     case 'requests':
       return pendingRequests.value
+
     case 'overdue':
       return overdueLoans.value
+
     case 'reservations':
       return roomReservations.value
+
     default:
       return []
   }
 }
 
-const openDetails = (stat) => {
+// OPEN DETAILS MODAL
+function openDetails(stat) {
   selectedStat.value = stat
   modalOpen.value = true
 }
 
-const closeModal = () => {
+// CLOSE DETAILS MODAL
+function closeModal() {
   modalOpen.value = false
   selectedStat.value = null
 }
 
+// MODAL RECORDS
 const modalRecords = computed(() => {
   if (!selectedStat.value) return []
+
   return getRecords(selectedStat.value.type)
 })
 
-const getRecordTitle = (record) => {
+// GET RECORD TITLE
+function getRecordTitle(record) {
   return (
     record.purpose ||
     record.title ||
@@ -261,9 +308,11 @@ const getRecordTitle = (record) => {
   )
 }
 
-const getRecordDate = (record) => {
+// GET RECORD DATE
+function getRecordDate(record) {
   return formatDate(
     record.scheduled_at ||
+    record.submitted_at ||
     record.created_at ||
     record.expected_completion ||
     record.due_date ||
@@ -272,17 +321,19 @@ const getRecordDate = (record) => {
 }
 
 // REALTIME REFRESH
-const scheduleRefresh = () => {
+function scheduleRefresh() {
   clearTimeout(refreshTimeout)
 
   refreshTimeout = setTimeout(() => {
     fetchDashboardData()
-  }, 400)
+  }, 500)
 }
 
-const subscribeToChanges = () => {
+// SUBSCRIBE TO DATABASE CHANGES
+function subscribeToChanges() {
   realtimeChannel = supabase
-    .channel('registrar-dashboard-realtime')
+    .channel('library-dashboard-realtime')
+
     .on(
       'postgres_changes',
       {
@@ -290,23 +341,19 @@ const subscribeToChanges = () => {
         schema: 'public',
         table: 'appointments'
       },
-      payload => {
-        console.log('Realtime appointments:', payload.eventType)
-        scheduleRefresh()
-      }
+      scheduleRefresh
     )
+
     .on(
       'postgres_changes',
       {
         event: '*',
         schema: 'public',
-        table: 'registrar_requests'
+        table: 'service_requests'
       },
-      payload => {
-        console.log('Realtime registrar_requests:', payload.eventType)
-        scheduleRefresh()
-      }
+      scheduleRefresh
     )
+
     .on(
       'postgres_changes',
       {
@@ -314,11 +361,9 @@ const subscribeToChanges = () => {
         schema: 'public',
         table: 'book_loans'
       },
-      payload => {
-        console.log('Realtime book_loans:', payload.eventType)
-        scheduleRefresh()
-      }
+      scheduleRefresh
     )
+
     .on(
       'postgres_changes',
       {
@@ -326,11 +371,9 @@ const subscribeToChanges = () => {
         schema: 'public',
         table: 'reservations'
       },
-      payload => {
-        console.log('Realtime reservations:', payload.eventType)
-        scheduleRefresh()
-      }
+      scheduleRefresh
     )
+
     .on(
       'postgres_changes',
       {
@@ -338,26 +381,27 @@ const subscribeToChanges = () => {
         schema: 'public',
         table: 'profiles'
       },
-      payload => {
-        console.log('Realtime profiles:', payload.eventType)
-        scheduleRefresh()
-      }
+      scheduleRefresh
     )
+
     .subscribe(status => {
-      console.log('Dashboard realtime status:', status)
+      console.log('Library dashboard realtime status:', status)
     })
 }
 
+// COMPONENT MOUNT
 onMounted(async () => {
   await fetchDashboardData()
   subscribeToChanges()
 })
 
+// COMPONENT UNMOUNT
 onUnmounted(() => {
   clearTimeout(refreshTimeout)
 
   if (realtimeChannel) {
     supabase.removeChannel(realtimeChannel)
+    realtimeChannel = null
   }
 })
 </script>
