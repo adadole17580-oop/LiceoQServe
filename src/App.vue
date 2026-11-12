@@ -16,8 +16,13 @@ import Students from './views/Students.vue'
 import ScheduleView from './views/ScheduleView.vue'
 import HistoryView from './views/HistoryView.vue'
 import ProfileView from './views/ProfileView.vue'
+import NotificationsView from './views/NotificationsView.vue'
 
-const isLoggedIn = ref(true)
+const API_BASE_URL = 'http://localhost:3000'
+
+const isLoggedIn = ref(false)
+const currentUser = ref(null)
+const accessToken = ref('')
 
 const activePage = ref('Dashboard')
 const activeFilter = ref('All')
@@ -29,92 +34,30 @@ const selectedAppointment = ref(null)
 const rescheduleValues = ref(null)
 const selectedGuidanceSession = ref(null)
 
+const notesSaving = ref(false)
+const notesSaveResult = ref(null)
+
 const showLogoutDialog = ref(false)
 
-const appointments = ref([
-  {
-    id: 1,
-    student: 'Daniel Padilla',
-    type: 'Counseling Session',
-    reference: 'GDN-005',
-    date: '2026-10-25',
-    time: '10:00',
-    status: 'Confirmed'
-  },
-  {
-    id: 2,
-    student: 'Angel Dadole',
-    type: 'Follow-up Appointment',
-    reference: 'GDN-006',
-    date: '2026-10-25',
-    time: '13:00',
-    status: 'Pending'
-  },
-  {
-    id: 3,
-    student: 'Maria Santos',
-    type: 'Guidance Consultation',
-    reference: 'GDN-007',
-    date: '2026-10-26',
-    time: '09:00',
-    status: 'Confirmed'
-  }
-])
+const appointments = ref([])
+const historyRecords = ref([])
 
-const guidanceSessions = ref([
-  {
-    id: 101,
-    student: 'Angel Dadole',
-    type: 'Counseling Session',
-    reference: 'GDN-005',
-    date: '2026-10-05',
-    time: '10:15',
-    status: 'Pending',
-    notes: '',
-    checkedInAt: ''
-  },
-  {
-    id: 102,
-    student: 'Rainier Amparo',
-    type: 'Career Guidance',
-    reference: 'GDN-006',
-    date: '2026-10-05',
-    time: '15:30',
-    status: 'Pending',
-    notes: '',
-    checkedInAt: ''
-  }
-])
+const dashboardSummary = ref({
+  readyForPickup: 0,
+  counselorsAvailable: 0
+})
 
-const notifications = ref([
-  {
-    id: 1,
-    title: 'Review reschedule session',
-    date: 'Oct. 4, 2026',
-    time: '9:45 AM',
-    read: false,
-    destination: 'Reschedule'
-  },
-  {
-    id: 2,
-    title: 'Appointment requires confirmation',
-    date: 'Today',
-    time: '10:00 AM',
-    read: false,
-    destination: 'Appointments'
-  },
-  {
-    id: 3,
-    title: 'Student Session needs Review',
-    date: 'Oct. 5, 2026',
-    time: '1:53 PM',
-    read: true,
-    destination: 'Guidance Sessions'
-  }
-])
-
-const unreadCount = computed(() =>
-  notifications.value.filter(item => !item.read).length
+const guidanceSessions = computed(() =>
+  appointments.value.map(item => ({
+    ...item,
+    studentName: item.student,
+    sessionType: item.type,
+    appointmentId: item.reference,
+    notes: item.staffNotes || '',
+    checkedInAt: item.checkedInAt || null,
+    sessionStartedAt: item.sessionStartedAt || null,
+    completedAt: item.completedAt || null
+  }))
 )
 
 const today = new Date().toLocaleDateString('en-CA', {
@@ -126,21 +69,37 @@ const todayAppointments = computed(() =>
 )
 
 const completedCount = computed(() =>
-  appointments.value.filter(item => item.status === 'Completed').length + 11
+  appointments.value.filter(
+    item => String(item.status || '').toLowerCase() === 'completed'
+  ).length
 )
 
+// READY FOR PICKUP FILTER SUPPORT
 const visibleAppointments = computed(() => {
   const search = searchText.value.trim().toLowerCase()
 
   return appointments.value.filter(item => {
+    const status = String(item.status || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[_-]+/g, ' ')
+
+    const selected = String(activeFilter.value || 'All')
+      .trim()
+      .toLowerCase()
+
     const matchesFilter =
-      activeFilter.value === 'All' ||
-      item.status === activeFilter.value
+      selected === 'all' ||
+      (
+        selected === 'ready for pickup'
+          ? status === 'reschedule requested'
+          : status === selected
+      )
 
     const matchesSearch =
-      item.student.toLowerCase().includes(search) ||
-      item.reference.toLowerCase().includes(search) ||
-      item.type.toLowerCase().includes(search)
+      String(item.student || '').toLowerCase().includes(search) ||
+      String(item.reference || '').toLowerCase().includes(search) ||
+      String(item.type || '').toLowerCase().includes(search)
 
     return matchesFilter && matchesSearch
   })
@@ -148,48 +107,228 @@ const visibleAppointments = computed(() => {
 
 const historyAppointments = computed(() => {
   const search = searchText.value.trim().toLowerCase()
-  const historyStatuses = ['Completed', 'Cancelled', 'No-show']
+
+  const historyStatuses = [
+    'completed',
+    'cancelled',
+    'no-show',
+    'rejected'
+  ]
 
   return appointments.value.filter(item => {
-    const isHistoryItem = historyStatuses.includes(item.status)
+    const status = String(item.status || '').toLowerCase()
+    const isHistoryItem = historyStatuses.includes(status)
 
     const matchesFilter =
       activeFilter.value === 'All' ||
-      item.status === activeFilter.value
+      status === activeFilter.value.toLowerCase()
 
     const matchesSearch =
-      item.student.toLowerCase().includes(search) ||
-      item.reference.toLowerCase().includes(search) ||
-      item.type.toLowerCase().includes(search)
+      String(item.student || '').toLowerCase().includes(search) ||
+      String(item.reference || '').toLowerCase().includes(search) ||
+      String(item.type || '').toLowerCase().includes(search)
 
     return isHistoryItem && matchesFilter && matchesSearch
   })
 })
 
-function navigate(page) {
-  activePage.value = page
+// ========================================
+// BACKEND API CONNECTION
+// ========================================
+
+async function apiRequest(endpoint, options = {}) {
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(options.headers || {})
+  }
+
+  if (accessToken.value) {
+    headers.Authorization = `Bearer ${accessToken.value}`
+  }
+
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    ...options,
+    headers
+  })
+
+  const result = await response.json().catch(() => ({}))
+
+  if (!response.ok || result.success === false) {
+    throw new Error(
+      result.message || `Request failed (${response.status})`
+    )
+  }
+
+  return result
+}
+
+// ========================================
+// LOAD APPOINTMENTS
+// ========================================
+
+async function loadAppointments() {
+  try {
+    const result = await apiRequest('/api/guidance/appointments')
+
+    appointments.value =
+      result.appointments ||
+      result.data ||
+      []
+
+    console.log(
+      'Guidance appointments loaded:',
+      appointments.value
+    )
+  } catch (error) {
+    console.error('Failed to load appointments:', error)
+    alert(`Unable to load appointments: ${error.message}`)
+  }
+}
+
+// ========================================
+// LOAD GUIDANCE HISTORY
+// ========================================
+
+async function loadHistory() {
+  try {
+    const result = await apiRequest('/api/guidance/history')
+
+    historyRecords.value =
+      result.history ||
+      result.data ||
+      []
+
+    console.log(
+      'Guidance history loaded:',
+      historyRecords.value
+    )
+  } catch (error) {
+    console.error('Failed to load Guidance history:', error)
+    alert(`Unable to load history: ${error.message}`)
+  }
+}
+
+// ========================================
+// LOAD DASHBOARD SUMMARY
+// ========================================
+
+async function loadDashboardSummary() {
+  try {
+    const result = await apiRequest('/api/guidance/dashboard')
+
+    dashboardSummary.value = {
+      readyForPickup: result.readyForPickup ?? 0,
+      counselorsAvailable: result.counselorsAvailable ?? 0
+    }
+
+    console.log(
+      'Dashboard summary loaded:',
+      dashboardSummary.value
+    )
+  } catch (error) {
+    console.error('Failed to load dashboard summary:', error)
+
+    dashboardSummary.value = {
+      readyForPickup: 0,
+      counselorsAvailable: 0
+    }
+  }
+}
+
+// ========================================
+// LOGIN
+// ========================================
+
+function handleLogin(payload) {
+  const token = payload?.session?.access_token
+
+  if (!token) {
+    alert(
+      'Login did not return an authentication token. Please sign in again.'
+    )
+    return
+  }
+
+  accessToken.value = token
+  currentUser.value = payload.user || null
+
+  isLoggedIn.value = true
+  activePage.value = 'Dashboard'
   activeFilter.value = 'All'
+  searchText.value = ''
+
+  // Load in background to keep login fast
+  Promise.allSettled([
+    loadAppointments(),
+    loadHistory(),
+    loadDashboardSummary()
+  ])
+}
+
+// ========================================
+// NAVIGATION
+// ========================================
+
+// Accepts both the page and an optional filter.
+// Dashboard can now open Appointments with Ready for Pickup selected.
+function navigate(page, filter = 'All') {
+  activePage.value = page
+  activeFilter.value = filter
   searchText.value = ''
 }
 
-function markAllAsRead() {
-  notifications.value.forEach(item => {
-    item.read = true
-  })
-}
-
 function openNotification(notification) {
-  notification.read = true
-
   if (notification.destination === 'Reschedule') {
-    selectedAppointment.value =
-      appointments.value.find(item => item.id === 2) ||
-      appointments.value[0] ||
-      null
+    const normalizeStatus = value =>
+      String(value ?? '')
+        .trim()
+        .toLowerCase()
+        .replace(/[_-]+/g, ' ')
+        .replace(/\s+/g, ' ')
 
+    const appointment = appointments.value.find(item => {
+      const statuses = [
+        item.status,
+        item.appointment_status,
+        item.appointmentStatus,
+        item.request_status,
+        item.requestStatus,
+        item.reschedule_status,
+        item.rescheduleStatus,
+        item.rescheduleRequest?.status,
+        item.reschedule_request?.status
+      ]
+
+      return statuses.some(status => {
+        const normalized = normalizeStatus(status)
+
+        return [
+          'reschedule requested',
+          'reschedule pending',
+          'pending reschedule'
+        ].includes(normalized)
+      })
+    })
+
+    if (!appointment) {
+      notification.read = true
+      activePage.value = 'Appointments'
+      activeFilter.value = 'All'
+      searchText.value = ''
+
+      alert(
+        'No pending reschedule requests found. Please check the appointment records.'
+      )
+      return
+    }
+
+    notification.read = true
+    selectedAppointment.value = appointment
     activePage.value = 'Reschedule'
     return
   }
+
+  notification.read = true
 
   if (notification.destination === 'Appointments') {
     activePage.value = 'Appointments'
@@ -206,31 +345,114 @@ function openNotification(notification) {
   navigate(notification.destination)
 }
 
+// ========================================
+// GUIDANCE SESSIONS
+// ========================================
+
 function openGuidanceSession(session) {
+  notesSaveResult.value = null
   selectedGuidanceSession.value = session
   activePage.value = 'Guidance Sessions Details'
 }
 
-function updateGuidanceSession(payload) {
-  const session = guidanceSessions.value.find(
-    item => item.id === payload.appointment?.id
-  )
+async function updateGuidanceSession(payload) {
+  const appointmentId = payload.appointment?.id
 
-  if (!session) return
+  if (!appointmentId) {
+    alert('Missing appointment ID.')
+    return
+  }
 
-  session.status = payload.status
-  session.checkedInAt = payload.checkedInAt || session.checkedInAt
+  try {
+    await apiRequest(
+      `/api/guidance/appointments/${appointmentId}/action`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          action: payload.action
+        })
+      }
+    )
+
+    await loadAppointments()
+
+    selectedGuidanceSession.value =
+      guidanceSessions.value.find(
+        item => item.id === appointmentId
+      ) || null
+
+    alert('Session status updated successfully.')
+  } catch (error) {
+    console.error('UPDATE SESSION ERROR:', error)
+
+    alert(
+      error.message || 'Unable to update session status.'
+    )
+  }
 }
 
-function saveGuidanceNotes(payload) {
-  const session = guidanceSessions.value.find(
-    item => item.id === payload.appointment?.id
-  )
+// ========================================
+// SAVE GUIDANCE NOTES
+// ========================================
 
-  if (!session) return
+async function saveGuidanceNotes(payload) {
+  const appointmentId = payload.appointment?.id
 
-  session.notes = payload.notes
+  if (!appointmentId) {
+    alert('Missing appointment ID.')
+    return
+  }
+
+  if (notesSaving.value) return
+
+  notesSaving.value = true
+  notesSaveResult.value = null
+
+  try {
+    const result = await apiRequest(
+      `/api/guidance/appointments/${appointmentId}/notes`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          notes: payload.notes
+        })
+      }
+    )
+
+    notesSaveResult.value = {
+      success: true,
+      appointmentId,
+      updatedAt:
+        result.appointment?.updated_at ||
+        result.appointment?.updatedAt ||
+        result.updated_at ||
+        result.updatedAt ||
+        new Date().toISOString()
+    }
+
+    await loadAppointments()
+
+    selectedGuidanceSession.value =
+      guidanceSessions.value.find(
+        item => item.id === appointmentId
+      ) || selectedGuidanceSession.value
+
+  } catch (error) {
+    console.error('SAVE NOTES ERROR:', error)
+
+    notesSaveResult.value = null
+
+    alert(
+      error.message || 'Unable to save session notes.'
+    )
+  } finally {
+    notesSaving.value = false
+  }
 }
+
+// ========================================
+// APPOINTMENT ACTIONS
+// ========================================
 
 function openAction(appointment, action) {
   selectedAppointment.value = appointment
@@ -263,7 +485,9 @@ function formatDialogTime(time) {
 function formatDialogDate(date) {
   if (!date) return ''
 
-  return new Date(`${date}T12:00:00`).toLocaleDateString('en-US', {
+  return new Date(
+    `${date}T12:00:00`
+  ).toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -293,8 +517,13 @@ const dialogMessage = computed(() => {
 
   if (!appointment) return ''
 
-  const date = rescheduleValues.value?.date || appointment.date
-  const time = rescheduleValues.value?.time || appointment.time
+  const date =
+    rescheduleValues.value?.date ||
+    appointment.date
+
+  const time =
+    rescheduleValues.value?.time ||
+    appointment.time
 
   return `${appointment.student} · ${appointment.type} · ${formatDialogDate(date)} at ${formatDialogTime(time)}`
 })
@@ -316,40 +545,60 @@ const dialogConfirmText = computed(() => {
   }
 })
 
-function confirmAction() {
-  const appointment = appointments.value.find(
-    item => item.id === selectedAppointment.value?.id
-  )
+async function confirmAction() {
+  const appointment = selectedAppointment.value
 
   if (!appointment) return
 
-  if (dialogAction.value === 'Confirm') {
-    appointment.status = 'Confirmed'
-  } else if (dialogAction.value === 'Complete') {
-    appointment.status = 'Completed'
-  } else if (dialogAction.value === 'Cancel') {
-    appointment.status = 'Cancelled'
-  } else if (dialogAction.value === 'No-show') {
-    appointment.status = 'No-show'
-  } else if (
-    dialogAction.value === 'Reschedule' &&
-    rescheduleValues.value
-  ) {
-    appointment.date = rescheduleValues.value.date
-    appointment.time = rescheduleValues.value.time
-    appointment.status = 'Pending'
-    activePage.value = 'Appointments'
-  }
+  try {
+    const body = {
+      action: dialogAction.value
+    }
 
-  showDialog.value = false
-  selectedAppointment.value = null
-  rescheduleValues.value = null
+    if (
+      dialogAction.value === 'Reschedule' &&
+      rescheduleValues.value
+    ) {
+      body.date = rescheduleValues.value.date
+      body.time = rescheduleValues.value.time
+    }
+
+    await apiRequest(
+      `/api/guidance/appointments/${appointment.id}/action`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(body)
+      }
+    )
+
+    await loadAppointments()
+
+    if (dialogAction.value === 'Reschedule') {
+      activePage.value = 'Appointments'
+    }
+
+    showDialog.value = false
+    selectedAppointment.value = null
+    rescheduleValues.value = null
+  } catch (error) {
+    console.error('Appointment action failed:', error)
+
+    alert(
+      `Unable to update appointment: ${error.message}`
+    )
+  }
 }
+
+// ========================================
+// DATE AND TIME FORMATTING
+// ========================================
 
 function formatSessionDate(date) {
   if (!date) return ''
 
-  return new Date(`${date}T12:00:00`).toLocaleDateString('en-US', {
+  return new Date(
+    `${date}T12:00:00`
+  ).toLocaleDateString('en-US', {
     month: 'long',
     day: 'numeric',
     year: 'numeric',
@@ -360,6 +609,8 @@ function formatSessionDate(date) {
 function formatSessionTime(time) {
   if (!time) return ''
 
+  if (/AM|PM/i.test(time)) return time
+
   const [hour, minute] = time.split(':').map(Number)
 
   return `${hour % 12 || 12}:${String(minute).padStart(2, '0')} ${
@@ -367,7 +618,10 @@ function formatSessionTime(time) {
   }`
 }
 
-// Logout modal
+// ========================================
+// LOGOUT
+// ========================================
+
 function logout() {
   showLogoutDialog.value = true
 }
@@ -378,12 +632,19 @@ function cancelLogout() {
 
 function confirmLogout() {
   showLogoutDialog.value = false
-  isLoggedIn.value = false
-  activePage.value = 'Dashboard'
-}
 
-function handleLogin() {
-  isLoggedIn.value = true
+  isLoggedIn.value = false
+  currentUser.value = null
+  accessToken.value = ''
+
+  appointments.value = []
+  historyRecords.value = []
+
+  dashboardSummary.value = {
+    readyForPickup: 0,
+    counselorsAvailable: 0
+  }
+
   activePage.value = 'Dashboard'
   activeFilter.value = 'All'
   searchText.value = ''
@@ -397,7 +658,9 @@ function handleLogin() {
   />
 
   <div v-else class="app-shell">
-    <AppHeader />
+    <AppHeader
+      :staff-name="currentUser?.full_name || 'Guidance Staff'"
+    />
 
     <div class="app-body">
       <AppSidebar
@@ -410,7 +673,10 @@ function handleLogin() {
         <DashboardView
           v-if="activePage === 'Dashboard'"
           :appointments="todayAppointments"
+          :recent-appointments="appointments"
           :completed-count="completedCount"
+          :counselors-available="dashboardSummary.counselorsAvailable"
+          :ready-for-pickup="dashboardSummary.readyForPickup"
           @navigate="navigate"
         />
 
@@ -428,14 +694,12 @@ function handleLogin() {
         <HistoryView
           v-else-if="activePage === 'History'"
           :appointments="historyAppointments"
-          :active-filter="activeFilter"
-          :search-text="searchText"
-          @update:active-filter="activeFilter = $event"
-          @update:search-text="searchText = $event"
         />
 
         <ProfileView
           v-else-if="activePage === 'Profile'"
+          :access-token="accessToken"
+          :current-user="currentUser"
         />
 
         <RescheduleView
@@ -446,61 +710,11 @@ function handleLogin() {
         />
 
         <!-- Notifications -->
-        <section
+        <NotificationsView
           v-else-if="activePage === 'Notifications'"
-          class="notifications-page"
-        >
-          <header class="notifications-heading">
-            <h1>Notifications</h1>
-            <p>Select an update to open the related transaction.</p>
-          </header>
-
-          <div class="notification-toolbar">
-            <button
-              class="mark-read-button"
-              :disabled="unreadCount === 0"
-              @click="markAllAsRead"
-            >
-              Mark all as read
-            </button>
-          </div>
-
-          <div class="notification-list">
-            <article
-              v-for="notification in notifications"
-              :key="notification.id"
-              class="notification-card"
-              :class="{ 'is-read': notification.read }"
-            >
-              <span
-                class="notification-dot"
-                :class="{ 'dot-read': notification.read }"
-                aria-hidden="true"
-              ></span>
-
-              <div class="notification-content">
-                <h2>{{ notification.title }}</h2>
-                <p>
-                  {{ notification.date }} · {{ notification.time }}
-                </p>
-              </div>
-
-              <button
-                class="notification-open"
-                @click="openNotification(notification)"
-              >
-                Open
-              </button>
-            </article>
-
-            <p
-              v-if="notifications.length === 0"
-              class="notification-empty"
-            >
-              You're all caught up. No notifications available.
-            </p>
-          </div>
-        </section>
+          :access-token="accessToken"
+          @open="openNotification"
+        />
 
         <!-- Guidance Sessions -->
         <section
@@ -552,19 +766,22 @@ function handleLogin() {
         <GuidanceSessionDetails
           v-else-if="activePage === 'Guidance Sessions Details'"
           :appointment="selectedGuidanceSession"
+          :notes-saving="notesSaving"
+          :notes-save-result="notesSaveResult"
           @back="navigate('Guidance Sessions')"
           @navigate="navigate"
           @session-action="updateGuidanceSession"
           @save-notes="saveGuidanceNotes"
         />
 
-        <!-- Students: only one Students component import is used -->
         <Students
           v-else-if="activePage === 'Students'"
+          :access-token="accessToken"
         />
 
         <ScheduleView
           v-else-if="activePage === 'Schedule'"
+          :access-token="accessToken"
           @navigate="navigate"
         />
 
@@ -599,7 +816,12 @@ function handleLogin() {
           aria-labelledby="logout-title"
         >
           <div class="logout-modal-heading">
-            <div class="logout-icon" aria-hidden="true">!</div>
+            <div
+              class="logout-icon"
+              aria-hidden="true"
+            >
+              !
+            </div>
 
             <h2 id="logout-title">
               Log Out of LiceoQServe?
@@ -681,7 +903,7 @@ button:disabled {
 
 .app-body {
   display: grid;
-  grid-template-columns: 225px minmax(0, 1fr);
+  grid-template-columns: 250px minmax(0, 1fr);
   width: 100%;
   min-height: calc(100vh - 89px);
   margin: 0;
@@ -762,6 +984,7 @@ button:disabled {
 }
 
 /* Shared buttons */
+
 .primary-button,
 .outline-button {
   padding: 10px 14px;
@@ -781,143 +1004,8 @@ button:disabled {
   border: 1px solid #d7b9bb;
 }
 
-/* Notifications */
-.notifications-page {
-  width: 100%;
-  min-width: 0;
-}
-
-.notifications-heading {
-  margin-bottom: 7px;
-}
-
-.notifications-heading h1 {
-  margin: 0;
-  color: #39090c;
-  font-family: Georgia, 'Times New Roman', serif;
-  font-size: 29px;
-  font-weight: normal;
-  line-height: 1.3;
-}
-
-.notifications-heading p {
-  margin: 0;
-  color: #39090c;
-  font-size: 14px;
-}
-
-.notification-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  min-height: 27px;
-  margin-top: 0;
-}
-
-.mark-read-button {
-  padding: 4px 6px;
-  color: #51090e;
-  background: transparent;
-  border: 0;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.mark-read-button:not(:disabled):hover {
-  text-decoration: underline;
-}
-
-.notification-list {
-  display: grid;
-  gap: 16px;
-  padding: 0 11px;
-}
-
-.notification-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  width: 100%;
-  min-height: 75px;
-  padding: 17px 14px;
-  background: #f8eeee;
-  border: 1px solid #a8787c;
-  border-radius: 15px;
-  transition: background 0.15s ease;
-}
-
-.notification-card.is-read {
-  background: #f5ebeb;
-  border-color: #c6a6a7;
-  color: #987d7e;
-}
-
-.notification-dot {
-  flex: 0 0 7px;
-  width: 7px;
-  height: 7px;
-  margin-top: 5px;
-  border-radius: 50%;
-  background: #650f18;
-}
-
-.notification-dot.dot-read {
-  background: #ad898b;
-}
-
-.notification-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.notification-content h2 {
-  margin: 0;
-  color: #290d0e;
-  font-size: 16px;
-  font-weight: 500;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-}
-
-.notification-content p {
-  margin: 6px 0 0;
-  color: #432c2d;
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-.notification-card.is-read .notification-content h2,
-.notification-card.is-read .notification-content p {
-  color: #987d7e;
-}
-
-.notification-open {
-  flex-shrink: 0;
-  align-self: center;
-  padding: 5px 10px;
-  color: #b00009;
-  background: transparent;
-  border: 0;
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.notification-open:hover {
-  text-decoration: underline;
-}
-
-.notification-card.is-read .notification-open {
-  color: #d66d70;
-}
-
-.notification-empty {
-  padding: 24px 10px;
-  color: #775f60;
-  font-size: 13px;
-  text-align: center;
-}
-
 /* Guidance Sessions */
+
 .guidance-page {
   width: 100%;
   min-width: 0;
@@ -1015,6 +1103,7 @@ button:disabled {
 }
 
 /* Logout confirmation */
+
 .logout-overlay {
   position: fixed;
   inset: 0;
@@ -1113,7 +1202,7 @@ button:disabled {
 
 @media (max-width: 900px) {
   .app-body {
-    grid-template-columns: 200px minmax(0, 1fr);
+    grid-template-columns: 220px minmax(0, 1fr);
   }
 
   .main-content {

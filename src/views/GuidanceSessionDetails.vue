@@ -1,17 +1,19 @@
+
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 
 const props = defineProps({
   appointment: {
     type: Object,
-    default: () => ({
-      studentName: 'Angel Dadole',
-      sessionType: 'Counseling Session',
-      appointmentId: 'GDN-005',
-      date: '2026-10-05',
-      time: '10:15 AM',
-      status: 'Pending'
-    })
+    default: () => ({})
+  },
+  notesSaving: {
+    type: Boolean,
+    default: false
+  },
+  notesSaveResult: {
+    type: Object,
+    default: null
   }
 })
 
@@ -22,101 +24,250 @@ const emit = defineEmits([
   'save-notes'
 ])
 
-const sessionStatus = ref(props.appointment.status || 'Pending')
 const notes = ref('')
 const notesSaved = ref(false)
 const savedAt = ref('')
-const checkedInAt = ref('')
-const sessionStartedAt = ref('')
-const completedAt = ref('')
+
 const showDialog = ref(false)
 const dialogAction = ref('')
 
 const studentName = computed(() =>
   props.appointment.studentName ||
+  props.appointment.student ||
   props.appointment.student_name ||
-  'Angel Dadole'
+  'Student'
 )
 
 const sessionType = computed(() =>
   props.appointment.sessionType ||
+  props.appointment.type ||
   props.appointment.session_type ||
-  'Counseling Session'
+  'Guidance Session'
 )
 
 const appointmentId = computed(() =>
   props.appointment.appointmentId ||
+  props.appointment.reference ||
   props.appointment.appointment_id ||
-  'GDN-005'
+  '—'
 )
 
 const formattedDate = computed(() => {
-  const rawDate = props.appointment.date || '2026-10-05'
-  const date = new Date(`${rawDate}T12:00:00`)
+  const rawDate = props.appointment.date
 
-  if (Number.isNaN(date.getTime())) return rawDate
+  if (!rawDate) return '—'
+
+  const date = new Date(rawDate)
+
+  if (Number.isNaN(date.getTime())) {
+    return String(rawDate)
+  }
 
   return date.toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
-    year: 'numeric'
+    year: 'numeric',
+    timeZone: 'Asia/Manila'
   })
 })
 
 const appointmentTime = computed(() =>
-  props.appointment.time || '10:15 AM'
+  props.appointment.time || '—'
 )
 
+const sessionStatus = computed(() => {
+  const status = String(
+    props.appointment.status || 'Pending'
+  )
+    .toLowerCase()
+    .replace(/[_-]/g, ' ')
+    .trim()
+
+  const labels = {
+    pending: 'Pending',
+    confirmed: 'Confirmed',
+    approved: 'Confirmed',
+    'checked in': 'Checked In',
+    'in progress': 'In Progress',
+    completed: 'Completed',
+    'no show': 'No Show',
+    cancelled: 'Cancelled',
+    canceled: 'Cancelled',
+    rejected: 'Rejected'
+  }
+
+  return labels[status] || props.appointment.status
+})
+
 const isCheckedIn = computed(() =>
-  ['Checked In', 'In Progress', 'Completed'].includes(sessionStatus.value)
+  ['Checked In', 'In Progress', 'Completed'].includes(
+    sessionStatus.value
+  )
 )
 
 const isInProgress = computed(() =>
-  ['In Progress', 'Completed'].includes(sessionStatus.value)
+  ['In Progress', 'Completed'].includes(
+    sessionStatus.value
+  )
 )
 
 const isCompleted = computed(() =>
   sessionStatus.value === 'Completed'
 )
 
-// Added for the No Show badge in the supplied UI reference.
 const isNoShow = computed(() =>
   sessionStatus.value === 'No Show'
 )
 
+// ACTUAL TIMESTAMPS FROM DATABASE
+const rawCheckedInAt = computed(() =>
+  props.appointment.checkedInAt ||
+  props.appointment.checked_in_at ||
+  null
+)
+
+const rawSessionStartedAt = computed(() =>
+  props.appointment.sessionStartedAt ||
+  props.appointment.session_started_at ||
+  null
+)
+
+const rawCompletedAt = computed(() =>
+  props.appointment.completedAt ||
+  props.appointment.sessionCompletedAt ||
+  props.appointment.session_completed_at ||
+  props.appointment.completed_at ||
+  null
+)
+
+function formatTimestamp(value) {
+  if (!value) return ''
+
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    return String(value)
+  }
+
+  return date.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: 'Asia/Manila'
+  })
+}
+
+const checkedInAt = computed(() =>
+  formatTimestamp(rawCheckedInAt.value)
+)
+
+const sessionStartedAt = computed(() =>
+  formatTimestamp(rawSessionStartedAt.value)
+)
+
+const completedAt = computed(() =>
+  formatTimestamp(rawCompletedAt.value)
+)
+
+// BADGE COLORS ONLY ACTIVATE WHEN TIMESTAMP EXISTS
+const hasCheckedInTime = computed(() =>
+  Boolean(rawCheckedInAt.value)
+)
+
+const hasSessionStartedTime = computed(() =>
+  Boolean(rawSessionStartedAt.value)
+)
+
+const hasCompletedTime = computed(() =>
+  Boolean(rawCompletedAt.value)
+)
+
+function formatSavedAt(value) {
+  const date = value ? new Date(value) : new Date()
+
+  if (Number.isNaN(date.getTime())) return ''
+
+  return date.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: 'Asia/Manila'
+  })
+}
+
+// LOAD EXISTING NOTES
+watch(
+  () => props.appointment,
+  (appointment, previousAppointment) => {
+    notes.value =
+      appointment?.staffNotes ??
+      appointment?.staff_notes ??
+      appointment?.notes ??
+      ''
+
+    if (appointment?.id !== previousAppointment?.id) {
+      notesSaved.value = false
+      savedAt.value = ''
+    }
+  },
+  { immediate: true }
+)
+
+// SAVE NOTES SUCCESS RESULT
+watch(
+  () => props.notesSaveResult,
+  (result) => {
+    if (!result?.success) return
+
+    const currentId = props.appointment.id
+
+    if (
+      result.appointmentId &&
+      currentId &&
+      String(result.appointmentId) !== String(currentId)
+    ) {
+      return
+    }
+
+    notesSaved.value = true
+    savedAt.value = formatSavedAt(result.updatedAt)
+  }
+)
+
+// CONFIRMATION DIALOG DETAILS
 const dialogDetails = computed(() => {
   const dialogs = {
     'Check In': {
       title: 'Check In this Student?',
-      message: 'Confirm that the student has arrived for the scheduled session.',
+      message:
+        'Confirm that the student has arrived for the scheduled session.',
       confirm: 'Confirm Check In'
     },
     'Start Session': {
       title: 'Start this Session?',
-      message: 'Are you ready to begin this counseling session?',
+      message:
+        'Are you ready to begin this counseling session?',
       confirm: 'Start Session'
     },
     'Complete Session': {
       title: 'Complete this Session?',
-      message: 'Make sure you have saved your session notes before completing this session.',
+      message:
+        'Make sure you have saved your session notes before completing this session.',
       confirm: 'Confirm completion'
     },
     'No Show': {
       title: 'Mark as No Show?',
-      message: 'Confirm that the student did not attend the scheduled appointment.',
+      message:
+        'Confirm that the student did not attend the scheduled appointment.',
       confirm: 'Confirm No Show'
     }
   }
 
   return dialogs[dialogAction.value] || dialogs['Check In']
 })
-
-function getCurrentTime() {
-  return new Date().toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit'
-  })
-}
 
 function openDialog(action) {
   dialogAction.value = action
@@ -130,37 +281,28 @@ function closeDialog() {
 function confirmAction() {
   const action = dialogAction.value
 
-  if (action === 'Check In') {
-    sessionStatus.value = 'Checked In'
-    checkedInAt.value = getCurrentTime()
-  }
-
-  if (action === 'Start Session') {
-    sessionStatus.value = 'In Progress'
-    sessionStartedAt.value = getCurrentTime()
-  }
-
-  if (action === 'Complete Session') {
-    sessionStatus.value = 'Completed'
-    completedAt.value = getCurrentTime()
-  }
-
-  if (action === 'No Show') {
-    sessionStatus.value = 'No Show'
-  }
-
   emit('session-action', {
     action,
     appointment: props.appointment,
-    status: sessionStatus.value
+    status:
+      action === 'Check In'
+        ? 'Checked In'
+        : action === 'Start Session'
+          ? 'In Progress'
+          : action === 'Complete Session'
+            ? 'Completed'
+            : action === 'No Show'
+              ? 'No Show'
+              : sessionStatus.value
   })
 
   showDialog.value = false
 }
 
 function saveNotes() {
-  notesSaved.value = true
-  savedAt.value = `${formattedDate.value} · ${getCurrentTime()}`
+  if (props.notesSaving) return
+
+  notesSaved.value = false
 
   emit('save-notes', {
     appointment: props.appointment,
@@ -174,18 +316,22 @@ function saveNotes() {
     <header class="page-header">
       <div>
         <h1>Guidance Sessions Details</h1>
+
         <p class="appointment-date">
           {{ formattedDate }} · {{ appointmentTime }}
         </p>
       </div>
 
-      <button class="back-button" type="button" @click="emit('back')">
+      <button
+        class="back-button"
+        type="button"
+        @click="emit('back')"
+      >
         Back to Appointment
       </button>
     </header>
 
     <section class="session-card">
-      <!-- Updated heading row: title on the left, No Show badge on the right. -->
       <div class="session-heading">
         <div class="session-heading-text">
           <h2>Guidance Sessions Details</h2>
@@ -197,11 +343,17 @@ function saveNotes() {
         </span>
       </div>
 
+      <!-- ACTION BUTTONS -->
       <div class="action-buttons">
         <button
           class="outline-button"
           type="button"
-          :disabled="isCheckedIn || sessionStatus === 'No Show'"
+          :disabled="
+            isCheckedIn ||
+            isNoShow ||
+            isCompleted ||
+            !['Pending', 'Confirmed'].includes(sessionStatus)
+          "
           @click="openDialog('Check In')"
         >
           Check In
@@ -210,7 +362,11 @@ function saveNotes() {
         <button
           class="outline-button"
           type="button"
-          :disabled="!isCheckedIn || isInProgress || sessionStatus === 'No Show'"
+          :disabled="
+            !isCheckedIn ||
+            isInProgress ||
+            isNoShow
+          "
           @click="openDialog('Start Session')"
         >
           Start Session
@@ -219,7 +375,11 @@ function saveNotes() {
         <button
           class="outline-button"
           type="button"
-          :disabled="!isInProgress || isCompleted || sessionStatus === 'No Show'"
+          :disabled="
+            !isInProgress ||
+            isCompleted ||
+            isNoShow
+          "
           @click="openDialog('Complete Session')"
         >
           Complete Session
@@ -228,21 +388,30 @@ function saveNotes() {
         <button
           class="outline-button"
           type="button"
-          :disabled="isCheckedIn || sessionStatus === 'No Show'"
+          :disabled="
+            isCheckedIn ||
+            isNoShow ||
+            isCompleted ||
+            !['Pending', 'Confirmed'].includes(sessionStatus)
+          "
           @click="openDialog('No Show')"
         >
           No Show
         </button>
       </div>
 
+      <!-- SESSION PROGRESS -->
       <section class="progress-panel">
         <h3>Session Progress</h3>
 
         <div class="progress-stages">
+          <!-- BLUE AFTER CHECK IN -->
           <div class="progress-stage">
             <span
               class="stage-pill"
-              :class="{ 'stage-complete': isCheckedIn }"
+              :class="{
+                'stage-checked-in': hasCheckedInTime
+              }"
             >
               Checked In
             </span>
@@ -253,10 +422,13 @@ function saveNotes() {
             </div>
           </div>
 
+          <!-- PINK AFTER START SESSION -->
           <div class="progress-stage">
             <span
               class="stage-pill"
-              :class="{ 'stage-complete': isInProgress }"
+              :class="{
+                'stage-in-progress': hasSessionStartedTime
+              }"
             >
               In Progress
             </span>
@@ -267,29 +439,37 @@ function saveNotes() {
             </div>
           </div>
 
+          <!-- GREEN AFTER COMPLETE SESSION -->
           <div class="progress-stage">
             <span
               class="stage-pill"
-              :class="{ 'stage-complete': isCompleted }"
+              :class="{
+                'stage-finished': hasCompletedTime
+              }"
             >
               Completed
             </span>
 
             <div class="stage-info">
-              <span v-if="isCompleted">Session Completed</span>
-              <span v-else>&nbsp;</span>
+              <span>Session Completed</span>
               <strong>{{ completedAt || '—' }}</strong>
             </div>
           </div>
         </div>
 
-        <p v-if="sessionStatus === 'No Show'" class="no-show-message">
+        <p
+          v-if="isNoShow"
+          class="no-show-message"
+        >
           This appointment has been marked as No Show.
         </p>
       </section>
 
+      <!-- SESSION NOTES -->
       <section class="notes-section">
-        <label for="session-notes">Session Notes</label>
+        <label for="session-notes">
+          Session Notes
+        </label>
 
         <textarea
           id="session-notes"
@@ -300,8 +480,13 @@ function saveNotes() {
         ></textarea>
 
         <div class="save-row">
-          <button class="save-button" type="button" @click="saveNotes">
-            Save Notes
+          <button
+            class="save-button"
+            type="button"
+            :disabled="notesSaving"
+            @click="saveNotes"
+          >
+            {{ notesSaving ? 'Saving...' : 'Save Notes' }}
           </button>
 
           <span class="privacy-note">
@@ -310,16 +495,23 @@ function saveNotes() {
         </div>
 
         <p class="notes-reminder">
-          Save the session notes before completing this counseling session.
+          Save the session notes before completing
+          this counseling session.
         </p>
 
-        <div v-if="notesSaved" class="save-success">
+        <div
+          v-if="notesSaved"
+          class="save-success"
+          role="status"
+          aria-live="polite"
+        >
           <strong>✓ Notes saved successfully</strong>
           <span>Last Updated: {{ savedAt }}</span>
         </div>
       </section>
     </section>
 
+    <!-- CONFIRMATION MODAL -->
     <div
       v-if="showDialog"
       class="modal-overlay"
@@ -381,6 +573,7 @@ function saveNotes() {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* HEADER */
 .page-header {
   display: flex;
   align-items: center;
@@ -407,6 +600,7 @@ function saveNotes() {
   font-size: 14px;
 }
 
+/* MAIN BUTTONS */
 .back-button,
 .save-button,
 .confirm-button {
@@ -429,7 +623,7 @@ function saveNotes() {
 }
 
 .back-button:hover,
-.save-button:hover,
+.save-button:hover:not(:disabled),
 .confirm-button:hover {
   border-color: #390609;
   background: #390609;
@@ -437,6 +631,7 @@ function saveNotes() {
   transform: translateY(-1px);
 }
 
+/* SESSION CARD */
 .session-card {
   width: 100%;
   padding: 25px 27px 13px;
@@ -445,7 +640,6 @@ function saveNotes() {
   background: #f8eeee;
 }
 
-/* Added layout rules for the heading and No Show badge. */
 .session-heading {
   display: flex;
   align-items: center;
@@ -481,6 +675,7 @@ function saveNotes() {
   font-weight: 600;
 }
 
+/* ACTION BUTTONS */
 .action-buttons {
   display: flex;
   flex-wrap: wrap;
@@ -527,6 +722,7 @@ function saveNotes() {
   cursor: not-allowed;
 }
 
+/* SESSION PROGRESS PANEL */
 .progress-panel {
   margin: 0 1px 16px;
   padding: 13px 16px 12px;
@@ -554,6 +750,7 @@ function saveNotes() {
   align-items: flex-start;
 }
 
+/* DEFAULT: GREY / NEUTRAL */
 .stage-pill {
   display: flex;
   align-items: center;
@@ -567,15 +764,34 @@ function saveNotes() {
   color: #300608;
   font-size: 11px;
   text-align: center;
-  transition: background 0.2s ease;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease;
 }
 
-.stage-pill.stage-complete {
+/* CHECKED IN: SOFT BLUE */
+.stage-pill.stage-checked-in {
+  border-color: #8cb6df;
+  background: #dceaf8;
+  color: #245b8a;
+}
+
+/* IN PROGRESS: ORIGINAL PINK */
+.stage-pill.stage-in-progress {
   border-color: #c58d8c;
   background: #f0c9c3;
   color: #39090c;
 }
 
+/* COMPLETED: GREEN */
+.stage-pill.stage-finished {
+  border-color: #83c89b;
+  background: #c7e8d0;
+  color: #22683b;
+}
+
+/* TIMESTAMPS */
 .stage-info {
   display: flex;
   flex-direction: column;
@@ -600,6 +816,7 @@ function saveNotes() {
   font-size: 12px;
 }
 
+/* NOTES */
 .notes-section {
   padding: 0 1px;
 }
@@ -659,6 +876,11 @@ function saveNotes() {
   box-shadow: 0 2px 5px rgba(81, 9, 14, 0.12);
 }
 
+.save-button:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
 .privacy-note {
   color: #3c2021;
   font-size: 11px;
@@ -671,6 +893,7 @@ function saveNotes() {
   line-height: 1.5;
 }
 
+/* SAVE NOTES SUCCESS */
 .save-success {
   display: flex;
   flex-direction: column;
@@ -692,6 +915,7 @@ function saveNotes() {
   font-size: 11px;
 }
 
+/* MODAL */
 .modal-overlay {
   position: fixed;
   z-index: 1000;
@@ -801,6 +1025,7 @@ function saveNotes() {
   }
 }
 
+/* RESPONSIVE */
 @media (max-width: 700px) {
   .guidance-details {
     padding: 20px 14px;

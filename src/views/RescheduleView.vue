@@ -14,15 +14,6 @@ const emit = defineEmits(['save', 'cancel'])
 const newDate = ref('')
 const newTime = ref('')
 
-watch(
-  () => props.appointment,
-  (appointment) => {
-    newDate.value = appointment?.date || ''
-    newTime.value = ''
-  },
-  { immediate: true }
-)
-
 const timeSlots = [
   { value: '08:00', label: '8:00 AM' },
   { value: '09:00', label: '9:00 AM' },
@@ -34,10 +25,81 @@ const timeSlots = [
   { value: '16:00', label: '4:00 PM' }
 ]
 
-function formatDate(date) {
-  if (!date) return ''
+function getScheduleDate(appointment) {
+  if (!appointment) return ''
 
-  return new Date(`${date}T12:00:00`).toLocaleDateString('en-US', {
+  if (appointment.date) {
+    return String(appointment.date).slice(0, 10)
+  }
+
+  const scheduledAt = appointment.scheduled_at
+
+  if (!scheduledAt) return ''
+
+  const date = new Date(scheduledAt)
+
+  if (Number.isNaN(date.getTime())) return ''
+
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(date)
+
+  const values = Object.fromEntries(
+    parts.map(part => [part.type, part.value])
+  )
+
+  return `${values.year}-${values.month}-${values.day}`
+}
+
+function getScheduleTime(appointment) {
+  if (!appointment) return ''
+
+  const time = appointment.time
+
+  if (time) {
+    const match = String(time).match(/^(\d{1,2}):(\d{2})/)
+
+    if (match) {
+      return `${String(Number(match[1])).padStart(2, '0')}:${match[2]}`
+    }
+  }
+
+  const scheduledAt = appointment.scheduled_at
+
+  if (!scheduledAt) return ''
+
+  const date = new Date(scheduledAt)
+
+  if (Number.isNaN(date.getTime())) return ''
+
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Manila',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23'
+  }).format(date)
+}
+
+watch(
+  () => props.appointment,
+  appointment => {
+    newDate.value = getScheduleDate(appointment)
+    newTime.value = ''
+  },
+  { immediate: true }
+)
+
+function formatDate(date) {
+  if (!date) return 'Date unavailable'
+
+  const parsed = new Date(`${date}T12:00:00`)
+
+  if (Number.isNaN(parsed.getTime())) return 'Date unavailable'
+
+  return parsed.toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
     year: 'numeric'
@@ -45,9 +107,16 @@ function formatDate(date) {
 }
 
 function formatTime(time) {
-  if (!time) return ''
+  if (!time) return 'Time unavailable'
 
-  const [hour, minute] = time.split(':').map(Number)
+  const match = String(time).match(/^(\d{1,2}):(\d{2})/)
+
+  if (!match) return 'Time unavailable'
+
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+
+  if (hour > 23 || minute > 59) return 'Time unavailable'
 
   return `${hour % 12 || 12}:${String(minute).padStart(2, '0')} ${hour >= 12 ? 'PM' : 'AM'}`
 }
@@ -58,7 +127,14 @@ function submitForm() {
     return
   }
 
-  const selectedDateTime = new Date(`${newDate.value}T${newTime.value}:00`)
+  const selectedDateTime = new Date(
+    `${newDate.value}T${newTime.value}:00+08:00`
+  )
+
+  if (Number.isNaN(selectedDateTime.getTime())) {
+    alert('Invalid date or time.')
+    return
+  }
 
   if (selectedDateTime <= new Date()) {
     alert('Please select a future date and time.')
@@ -76,34 +152,43 @@ function submitForm() {
   <div class="reschedule-page">
     <section class="page-heading">
       <h1>Reschedule Appointments</h1>
+
       <p v-if="appointment">
-        {{ appointment.student }} · {{ appointment.reference }}
+        {{ appointment.student || appointment.student_name }}
+        ·
+        {{ appointment.reference || appointment.transaction_id }}
       </p>
     </section>
 
     <section v-if="appointment" class="reschedule-panel">
       <div class="current-schedule">
         <strong>Current Schedule:</strong>
+
         <span>
-          {{ formatDate(appointment.date) }} at
-          {{ formatTime(appointment.time) }}
+          {{ formatDate(getScheduleDate(appointment)) }}
+          at
+          {{ formatTime(getScheduleTime(appointment)) }}
         </span>
       </div>
 
       <form class="reschedule-form" @submit.prevent="submitForm">
         <div class="form-field">
           <label for="new-date">New Date</label>
+
           <input
             id="new-date"
             v-model="newDate"
             type="date"
-            :min="new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' })"
+            :min="new Date().toLocaleDateString('en-CA', {
+              timeZone: 'Asia/Manila'
+            })"
             required
           />
         </div>
 
         <div class="form-field">
           <label for="new-time">New Time</label>
+
           <select id="new-time" v-model="newTime" required>
             <option value="" disabled>Choose a time</option>
 
@@ -135,7 +220,11 @@ function submitForm() {
 
     <section v-else class="reschedule-panel empty-panel">
       <h2>No appointment selected</h2>
-      <p>Go back to Appointments and select an appointment to reschedule.</p>
+
+      <p>
+        Go back to Appointments and select an appointment to reschedule.
+      </p>
+
       <button class="primary-button" @click="emit('cancel')">
         Back to Appointments
       </button>

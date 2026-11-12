@@ -1,50 +1,158 @@
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
+
+const props = defineProps({
+  appointments: {
+    type: Array,
+    default: () => []
+  }
+})
 
 const selectedHistory = ref(null)
 
-const historyItems = ref([
-  {
-    id: 1,
-    title: 'Guidance Session - Angel Dadole',
-    date: 'Oct. 5, 2026',
-    time: '10:15 PM',
-    student: 'Angel Dadole',
-    transactionId: 'APP-2026-00125',
-    previousStatus: 'Processing',
-    updatedStatus: 'Completed',
-    performedBy: 'Guidance Office Staff',
-    notes: 'Appointment completed by assigned staff.',
-    whatHappened: 'Guidance Session - Angel Dadole'
-  },
-  {
-    id: 2,
-    title: 'Appointment Completed - Student Consultation',
-    date: 'Oct. 1, 2026',
-    time: '3:42 PM',
-    student: 'Student Consultation',
-    transactionId: 'APP-2026-00124',
-    previousStatus: 'Confirmed',
-    updatedStatus: 'Completed',
-    performedBy: 'Guidance Office Staff',
-    notes: 'Appointment marked as completed.',
-    whatHappened: 'Appointment Completed - Student Consultation'
-  },
-  {
-    id: 3,
-    title: 'Reschedule Session - Career Guidance',
-    date: 'Sept. 30, 2026',
-    time: '2:35 PM',
-    student: 'Career Guidance',
-    transactionId: 'APP-2026-00123',
-    previousStatus: 'Pending',
-    updatedStatus: 'Rescheduled',
-    performedBy: 'Guidance Office Staff',
-    notes: 'Guidance session schedule updated.',
-    whatHappened: 'Reschedule Session - Career Guidance'
+const historyItems = computed(() => {
+  return props.appointments.map(item => {
+    const student =
+      typeof item.student === 'object'
+        ? item.student?.full_name ||
+          item.student?.name ||
+          'Unknown Student'
+        : item.student ||
+          item.student_name ||
+          item.studentName ||
+          'Unknown Student'
+
+    const service =
+      item.service?.name ||
+      item.service?.service_name ||
+      item.service_name ||
+      item.serviceName ||
+      item.type ||
+      'Guidance Appointment'
+
+    const scheduledAt =
+      item.scheduledAt ||
+      item.scheduled_at ||
+      null
+
+    const date = scheduledAt
+      ? formatDate(scheduledAt)
+      : item.date
+        ? formatDate(item.date)
+        : 'Date unavailable'
+
+    const time = scheduledAt
+      ? formatTime(scheduledAt)
+      : item.time || 'Time unavailable'
+
+    const status = String(item.status || 'Unknown')
+
+    return {
+      id: item.id,
+      title: `${service} - ${student}`,
+      date,
+      time,
+      student,
+
+      studentId:
+        item.studentId ||
+        item.student_id ||
+        'N/A',
+
+      service,
+
+      transactionId:
+        item.reference ||
+        item.transaction_id ||
+        String(item.id || 'N/A'),
+
+      previousStatus:
+        item.previous_status ||
+        item.previousStatus ||
+        'Not recorded',
+
+      updatedStatus: status,
+
+      performedBy:
+        item.performed_by_name ||
+        item.handled_by ||
+        item.performed_by ||
+        item.performedBy ||
+        'Not recorded',
+
+      whatHappened: `${service} - ${student}`,
+
+      purpose: item.purpose || 'No purpose provided.',
+
+      studentNotes:
+        item.student_notes ||
+        item.studentNotes ||
+        'No student notes recorded.',
+
+      staffNotes:
+        item.staff_notes ||
+        item.staffNotes ||
+        'No staff notes recorded.'
+    }
+  })
+})
+
+function formatDate(value) {
+  if (!value) return 'Date unavailable'
+
+  // Already formatted date from the backend
+  if (
+    typeof value === 'string' &&
+    /^[A-Za-z]{3,}\.?\s+\d{1,2},?\s+\d{4}$/.test(value)
+  ) {
+    return value
   }
-])
+
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(`${value}T12:00:00`)
+    : new Date(value)
+
+  if (Number.isNaN(date.getTime())) return value
+
+  return date.toLocaleDateString('en-US', {
+    timeZone: 'Asia/Manila',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  })
+}
+
+function formatTime(value) {
+  if (!value) return 'Time unavailable'
+
+  // Already formatted time from the backend
+  if (
+    typeof value === 'string' &&
+    /\b(AM|PM)\b/i.test(value)
+  ) {
+    return value
+  }
+
+  // Handle HH:mm time strings
+  if (/^\d{1,2}:\d{2}$/.test(value)) {
+    const [hour, minute] = value.split(':').map(Number)
+
+    return `${hour % 12 || 12}:${String(minute).padStart(2, '0')} ${
+      hour >= 12 ? 'PM' : 'AM'
+    }`
+  }
+
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) return value
+
+  return date.toLocaleTimeString('en-US', {
+    timeZone: 'Asia/Manila',
+    hour: 'numeric',
+    minute: '2-digit'
+  })
+}
 
 function openDetails(item) {
   selectedHistory.value = item
@@ -57,12 +165,16 @@ function closeDetails() {
 
 <template>
   <section class="history-page">
+
     <header class="history-heading">
       <h1>History</h1>
-      <p>Select a concise history item to view its complete audit details.</p>
+      <p>
+        Select a concise history item to view its complete audit details.
+      </p>
     </header>
 
-    <div class="history-list">
+    <div v-if="historyItems.length > 0" class="history-list">
+
       <article
         v-for="item in historyItems"
         :key="item.id"
@@ -80,6 +192,14 @@ function closeDetails() {
           View details
         </button>
       </article>
+
+    </div>
+
+    <div v-else class="history-empty">
+      <h2>No History Records Found</h2>
+      <p>
+        There are currently no appointment records matching your history.
+      </p>
     </div>
 
     <div
@@ -94,14 +214,21 @@ function closeDetails() {
         aria-modal="true"
         aria-labelledby="history-modal-title"
       >
+
         <header class="history-modal-header">
           <div>
-            <span class="history-eyebrow">HISTORY DETAILS</span>
+            <span class="history-eyebrow">
+              HISTORY DETAILS
+            </span>
+
             <h2 id="history-modal-title">
               {{ selectedHistory.whatHappened }}
             </h2>
+
             <p class="history-modal-date">
-              {{ selectedHistory.date }} · {{ selectedHistory.time }}
+              {{ selectedHistory.date }}
+              ·
+              {{ selectedHistory.time }}
             </p>
           </div>
 
@@ -115,6 +242,7 @@ function closeDetails() {
         </header>
 
         <div class="history-details-grid">
+
           <div class="history-detail">
             <span>What Happened</span>
             <strong>{{ selectedHistory.whatHappened }}</strong>
@@ -123,6 +251,11 @@ function closeDetails() {
           <div class="history-detail">
             <span>Student</span>
             <strong>{{ selectedHistory.student }}</strong>
+          </div>
+
+          <div class="history-detail">
+            <span>Student ID</span>
+            <strong>{{ selectedHistory.studentId }}</strong>
           </div>
 
           <div class="history-detail">
@@ -144,14 +277,31 @@ function closeDetails() {
             <span>Performed By</span>
             <strong>{{ selectedHistory.performedBy }}</strong>
           </div>
+
         </div>
 
         <div class="history-notes">
-          <strong>Notes / instructions:</strong>
-          {{ selectedHistory.notes }}
+
+          <div class="note-section">
+            <strong>Purpose</strong>
+            <p>{{ selectedHistory.purpose }}</p>
+          </div>
+
+          <div class="note-section">
+            <strong>Student Notes</strong>
+            <p>{{ selectedHistory.studentNotes }}</p>
+          </div>
+
+          <div class="note-section">
+            <strong>Staff Notes</strong>
+            <p>{{ selectedHistory.staffNotes }}</p>
+          </div>
+
         </div>
+
       </section>
     </div>
+
   </section>
 </template>
 
@@ -225,11 +375,36 @@ function closeDetails() {
   border: 0;
   font-size: 12px;
   font-weight: 700;
+  cursor: pointer;
 }
 
-.history-details-button:hover,
-.history-close-button:hover {
+.history-details-button:hover {
   text-decoration: underline;
+}
+
+.history-empty {
+  width: 100%;
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 30px;
+  text-align: center;
+  background: #f8eeee;
+  border: 1px solid #a8787c;
+  border-radius: 25px;
+}
+
+.history-empty h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.history-empty p {
+  margin: 0;
+  color: #806d6e;
+  font-size: 13px;
 }
 
 .history-modal-backdrop {
@@ -294,12 +469,17 @@ function closeDetails() {
   background: transparent;
   border: 0;
   font-size: 11px;
+  cursor: pointer;
+}
+
+.history-close-button:hover {
+  text-decoration: underline;
 }
 
 .history-details-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px 24px;
+  gap: 12px 24px;
 }
 
 .history-detail {
@@ -327,12 +507,21 @@ function closeDetails() {
   background: #edd9da;
   border-radius: 10px;
   color: #39090c;
-  font-size: 11px;
-  line-height: 1.5;
 }
 
-.history-notes strong {
-  font-weight: 700;
+.note-section + .note-section {
+  margin-top: 14px;
+}
+
+.note-section strong {
+  font-size: 12px;
+}
+
+.note-section p {
+  margin: 5px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 600px) {

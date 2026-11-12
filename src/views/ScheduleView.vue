@@ -1,24 +1,39 @@
-```vue
+
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
+
+const props = defineProps({
+  accessToken: {
+    type: String,
+    required: true
+  }
+})
 
 const emit = defineEmits(['navigate'])
+
+const API_BASE_URL = 'http://localhost:3000'
 
 const selectedDate = ref('')
 const selectedTime = ref('')
 const blockReason = ref('')
 
-const blockedSchedules = ref([
-  {
-    id: 1,
-    date: '2026-10-10',
-    time: '9:00 AM - 5:00 PM',
-    reason: 'University Event'
-  }
-])
+const officeHours = ref([])
+const blockedSchedules = ref([])
+
+const isLoading = ref(false)
+const isSaving = ref(false)
+
+const dayNames = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday'
+]
 
 const timeOptions = [
-  '8:00 AM - 9:00 AM',
   '9:00 AM - 10:00 AM',
   '10:00 AM - 11:00 AM',
   '11:00 AM - 12:00 PM',
@@ -30,52 +45,225 @@ const timeOptions = [
   '9:00 AM - 5:00 PM'
 ]
 
+// ========================================
+// BACKEND API REQUEST
+// ========================================
+
+async function apiRequest(endpoint, options = {}) {
+  if (!props.accessToken) {
+    throw new Error('Authentication token is missing. Please log in again.')
+  }
+
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${props.accessToken}`,
+      ...(options.headers || {})
+    }
+  })
+
+  const result = await response.json().catch(() => ({}))
+
+  if (!response.ok || result.success === false) {
+    throw new Error(
+      result.message || `Request failed (${response.status})`
+    )
+  }
+
+  return result
+}
+
+// ========================================
+// FORMAT DATE AND TIME
+// ========================================
+
+function getDayName(day) {
+  return dayNames[Number(day)] || 'Unknown'
+}
+
+function formatDatabaseTime(time) {
+  if (!time) return ''
+
+  const [hour, minute] = time.split(':').map(Number)
+
+  return `${hour % 12 || 12}:${String(minute).padStart(2, '0')} ${
+    hour >= 12 ? 'PM' : 'AM'
+  }`
+}
+
 function formatDate(date) {
   if (!date) return ''
 
-  return new Date(`${date}T12:00:00`).toLocaleDateString(
-    'en-US',
-    {
-      month: 'long',
-      day: 'numeric'
-    }
-  )
+  return new Date(`${date}T12:00:00`).toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric'
+  })
 }
 
-function blockSchedule() {
+function convertToDatabaseTime(timeText) {
+  const match = timeText.match(/^(\d{1,2}):(\d{2})\s(AM|PM)$/)
+
+  if (!match) {
+    throw new Error('Invalid selected time.')
+  }
+
+  let hour = Number(match[1])
+  const minute = match[2]
+  const period = match[3]
+
+  if (period === 'PM' && hour !== 12) {
+    hour += 12
+  }
+
+  if (period === 'AM' && hour === 12) {
+    hour = 0
+  }
+
+  return `${String(hour).padStart(2, '0')}:${minute}:00`
+}
+
+// ========================================
+// LOAD OFFICE HOURS
+// ========================================
+
+async function loadOfficeHours() {
+  const result = await apiRequest(
+    '/api/guidance/schedule/office-hours'
+  )
+
+  officeHours.value = result.officeHours || []
+}
+
+// ========================================
+// LOAD BLOCKED SCHEDULES
+// ========================================
+
+async function loadBlockedSchedules() {
+  const result = await apiRequest(
+    '/api/guidance/schedule/blocked'
+  )
+
+  blockedSchedules.value = (result.blockedSchedules || []).map(item => ({
+    id: item.id,
+    date: item.blocked_date,
+    time: item.is_all_day
+      ? '9:00 AM - 5:00 PM'
+      : `${formatDatabaseTime(item.start_time)} - ${formatDatabaseTime(item.end_time)}`,
+    reason: item.reason || 'Unavailable'
+  }))
+}
+
+// ========================================
+// LOAD ALL SCHEDULE DATA
+// ========================================
+
+async function loadScheduleData() {
+  isLoading.value = true
+
+  try {
+    await Promise.all([
+      loadOfficeHours(),
+      loadBlockedSchedules()
+    ])
+  } catch (error) {
+    console.error('Failed to load Guidance schedule:', error)
+
+    alert(`Unable to load schedule: ${error.message}`)
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// ========================================
+// ADD BLOCKED SCHEDULE
+// ========================================
+
+async function blockSchedule() {
   if (!selectedDate.value || !selectedTime.value) {
     alert('Please select a date and time.')
     return
   }
 
-  const alreadyBlocked = blockedSchedules.value.some(
-    item =>
-      item.date === selectedDate.value &&
-      item.time === selectedTime.value
-  )
+  if (isSaving.value) return
 
-  if (alreadyBlocked) {
-    alert('This date and time are already blocked.')
+  isSaving.value = true
+
+  try {
+    const isAllDay =
+      selectedTime.value === '9:00 AM - 5:00 PM'
+
+    const [startText, endText] = selectedTime.value.split(' - ')
+
+    const payload = {
+      blocked_date: selectedDate.value,
+      start_time: isAllDay
+        ? null
+        : convertToDatabaseTime(startText),
+      end_time: isAllDay
+        ? null
+        : convertToDatabaseTime(endText),
+      is_all_day: isAllDay,
+      reason: blockReason.value.trim() || 'Unavailable'
+    }
+
+    await apiRequest('/api/guidance/schedule/blocked', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    })
+
+    await loadBlockedSchedules()
+
+    selectedDate.value = ''
+    selectedTime.value = ''
+    blockReason.value = ''
+
+    alert('Schedule blocked successfully.')
+  } catch (error) {
+    console.error('Failed to block schedule:', error)
+
+    alert(error.message)
+  } finally {
+    isSaving.value = false
+  }
+}
+
+// ========================================
+// DELETE BLOCKED SCHEDULE
+// ========================================
+
+async function removeBlockedSchedule(id) {
+  if (!confirm('Are you sure you want to remove this blocked schedule?')) {
     return
   }
 
-  blockedSchedules.value.push({
-    id: Date.now(),
-    date: selectedDate.value,
-    time: selectedTime.value,
-    reason: blockReason.value.trim() || 'Unavailable'
-  })
+  try {
+    await apiRequest(
+      `/api/guidance/schedule/blocked/${encodeURIComponent(id)}`,
+      {
+        method: 'DELETE'
+      }
+    )
 
-  selectedDate.value = ''
-  selectedTime.value = ''
-  blockReason.value = ''
+    blockedSchedules.value = blockedSchedules.value.filter(
+      item => item.id !== id
+    )
+
+    alert('Blocked schedule removed successfully.')
+  } catch (error) {
+    console.error('Failed to remove blocked schedule:', error)
+
+    alert(error.message)
+  }
 }
 
-function removeBlockedSchedule(id) {
-  blockedSchedules.value = blockedSchedules.value.filter(
-    item => item.id !== id
-  )
-}
+// ========================================
+// INITIAL LOAD
+// ========================================
+
+onMounted(() => {
+  loadScheduleData()
+})
 </script>
 
 <template>
@@ -88,37 +276,51 @@ function removeBlockedSchedule(id) {
     </header>
 
     <div class="schedule-grid">
+
+      <!-- OFFICE HOURS -->
       <section class="schedule-panel office-panel">
         <h2>Office Hours</h2>
 
         <div class="office-hours-list">
-          <div class="office-hour-row">
-            <strong>Monday</strong>
-            <span>9:00 AM - 5:00 PM</span>
+          <div
+            v-for="item in officeHours"
+            :key="item.id"
+            class="office-hour-row"
+          >
+            <strong>
+              {{ getDayName(item.day_of_week) }}
+            </strong>
+
+            <span>
+              <template v-if="item.is_open">
+                {{ formatDatabaseTime(item.opening_time) }}
+                -
+                {{ formatDatabaseTime(item.closing_time) }}
+              </template>
+
+              <template v-else>
+                Closed
+              </template>
+            </span>
           </div>
 
-          <div class="office-hour-row">
-            <strong>Tuesday</strong>
-            <span>9:00 AM - 5:00 PM</span>
-          </div>
+          <p
+            v-if="isLoading && !officeHours.length"
+            class="empty-message"
+          >
+            Loading office hours...
+          </p>
 
-          <div class="office-hour-row">
-            <strong>Wednesday</strong>
-            <span>9:00 AM - 5:00 PM</span>
-          </div>
-
-          <div class="office-hour-row">
-            <strong>Thursday</strong>
-            <span>9:00 AM - 5:00 PM</span>
-          </div>
-
-          <div class="office-hour-row">
-            <strong>Friday</strong>
-            <span>9:00 AM - 5:00 PM</span>
-          </div>
+          <p
+            v-else-if="!officeHours.length"
+            class="empty-message"
+          >
+            No office hours available.
+          </p>
         </div>
       </section>
 
+      <!-- BLOCK A DATE OR TIME -->
       <section class="schedule-panel block-panel">
         <h2>Block a date or time</h2>
 
@@ -143,7 +345,9 @@ function removeBlockedSchedule(id) {
             v-model="selectedTime"
             required
           >
-            <option value="" disabled>Choose a time</option>
+            <option value="" disabled>
+              Choose a time
+            </option>
 
             <option
               v-for="time in timeOptions"
@@ -165,11 +369,16 @@ function removeBlockedSchedule(id) {
             placeholder="Reason (e.g. University Event)"
           />
 
-          <button type="submit" class="block-button">
-            BLOCK DATE AND TIME
+          <button
+            type="submit"
+            class="block-button"
+            :disabled="isSaving"
+          >
+            {{ isSaving ? 'SAVING...' : 'BLOCK DATE AND TIME' }}
           </button>
         </form>
 
+        <!-- BLOCKED SCHEDULE LIST -->
         <div
           v-for="item in blockedSchedules"
           :key="item.id"
@@ -192,7 +401,14 @@ function removeBlockedSchedule(id) {
         </div>
 
         <p
-          v-if="!blockedSchedules.length"
+          v-if="isLoading && !blockedSchedules.length"
+          class="empty-message"
+        >
+          Loading blocked schedules...
+        </p>
+
+        <p
+          v-else-if="!blockedSchedules.length"
           class="empty-message"
         >
           No blocked dates or times.
@@ -310,6 +526,11 @@ function removeBlockedSchedule(id) {
 
 .block-button:hover {
   background: #51090e;
+}
+
+.block-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .blocked-item {

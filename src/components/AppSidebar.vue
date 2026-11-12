@@ -27,6 +27,7 @@ const menuItems = [
       <button
         v-for="item in menuItems"
         :key="item"
+        type="button"
         :class="{ selected: activePage === item }"
         @click="emit('navigate', item)"
       >
@@ -37,10 +38,14 @@ const menuItems = [
     <div class="sidebar-bottom">
       <div class="office-status">
         <strong>Office status</strong>
-        <small>Open · 8:00 AM–5:00 PM</small>
+        <small>Open · 9:00 AM–5:00 PM</small>
       </div>
 
-      <button class="logout-button" @click="emit('logout')">
+      <button
+        class="logout-button"
+        type="button"
+        @click="emit('logout')"
+      >
         LOG OUT
       </button>
     </div>
@@ -54,28 +59,32 @@ const menuItems = [
   width: 100%;
   min-width: 0;
   min-height: calc(100vh - 84px);
-  padding: 18px 12px 12px;
+  padding: 20px 14px 14px;
   background: #f8eeee;
   border-right: 1px solid #c9b8b8;
+  box-sizing: border-box;
 }
 
 .navigation {
   display: grid;
-  gap: 5px;
+  gap: 6px;
 }
 
 .navigation button {
   width: 100%;
-  min-height: 39px;
-  padding: 10px 16px;
+  min-height: 43px;
+  padding: 11px 17px;
   color: #39090c;
   text-align: left;
   text-transform: uppercase;
   background: transparent;
   border: 0;
   border-radius: 7px;
-  font-size: 12px;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 13px;
   font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease;
 }
 
 .navigation button:hover,
@@ -93,36 +102,37 @@ const menuItems = [
   display: flex;
   flex-direction: column;
   gap: 5px;
-  padding: 12px;
-  margin-bottom: 9px;
+  padding: 13px;
+  margin-bottom: 10px;
   background: #ead6d7;
-  border-radius: 7px;
-  font-size: 11px;
+  border-radius: 8px;
+  font-size: 12px;
 }
 
 .office-status strong {
-  font-weight: normal;
+  font-weight: 400;
 }
 
 .office-status small {
   color: #775f60;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .logout-button {
   width: 100%;
-  min-height: 44px;
-  padding: 10px;
+  min-height: 45px;
+  padding: 11px;
   color: #39090c;
   background: transparent;
   border: 1px solid #51090e;
   border-radius: 7px;
   font-size: 13px;
   font-weight: 600;
+  cursor: pointer;
 }
 
 .logout-button:hover {
-  color: white;
+  color: #fffafa;
   background: #51090e;
 }
 
@@ -134,6 +144,13 @@ const menuItems = [
 
   .navigation {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .navigation button {
+    min-height: 40px;
+    padding: 9px 10px;
+    font-size: 11px;
   }
 
   .sidebar-bottom {

@@ -7,9 +7,21 @@ const props = defineProps({
     type: Array,
     default: () => []
   },
+  recentAppointments: {
+    type: Array,
+    default: () => []
+  },
   completedCount: {
     type: Number,
-    default: 11
+    default: 0
+  },
+  counselorsAvailable: {
+    type: Number,
+    default: 0
+  },
+  readyForPickup: {
+    type: Number,
+    default: 0
   }
 })
 
@@ -22,16 +34,31 @@ const todayLabel = new Date().toLocaleDateString('en-US', {
   timeZone: 'Asia/Manila'
 }).toUpperCase()
 
-const recentWork = computed(() => props.appointments.slice(0, 3))
+const recentWork = computed(() =>
+  props.recentAppointments.slice(0, 3)
+)
 
 function formatTime(time) {
   if (!time) return ''
-  const [hour, minute] = time.split(':').map(Number)
+
+  const timeText = String(time).trim()
+
+  if (/AM|PM/i.test(timeText)) {
+    return timeText
+  }
+
+  const [hour, minute] = timeText.split(':').map(Number)
+
+  if (Number.isNaN(hour) || Number.isNaN(minute)) {
+    return timeText
+  }
+
   return `${hour % 12 || 12}:${String(minute).padStart(2, '0')} ${hour >= 12 ? 'PM' : 'AM'}`
 }
 
 function formatDate(date) {
   if (!date) return ''
+
   return new Date(`${date}T12:00:00`).toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric'
@@ -53,25 +80,45 @@ function formatDate(date) {
       <article class="stat-card">
         <p>TODAY'S APPOINTMENTS</p>
         <strong>{{ appointments.length }}</strong>
-        <button @click="emit('navigate', 'Appointments')">View details</button>
+        <button
+          type="button"
+          @click="emit('navigate', 'Appointments')"
+        >
+          View details
+        </button>
       </article>
 
       <article class="stat-card">
         <p>COMPLETED SESSIONS</p>
         <strong>{{ completedCount }}</strong>
-        <button @click="emit('navigate', 'History')">View details</button>
+        <button
+          type="button"
+          @click="emit('navigate', 'History')"
+        >
+          View details
+        </button>
       </article>
 
       <article class="stat-card">
         <p>COUNSELORS AVAILABLE</p>
-        <strong>3</strong>
-        <button @click="emit('navigate', 'Guidance Sessions')">View details</button>
+        <strong>{{ counselorsAvailable }}</strong>
+        <button
+          type="button"
+          @click="emit('navigate', 'Guidance Sessions')"
+        >
+          View details
+        </button>
       </article>
 
       <article class="stat-card">
         <p>READY FOR PICKUP</p>
-        <strong>0</strong>
-        <button @click="emit('navigate', 'Notifications')">View details</button>
+        <strong>{{ readyForPickup }}</strong>
+        <button
+          type="button"
+          @click="emit('navigate', 'Appointments', 'Ready for Pickup')"
+        >
+          View details
+        </button>
       </article>
     </section>
 
@@ -84,14 +131,19 @@ function formatDate(date) {
           :key="appointment.id"
           class="work-row"
         >
-          <strong class="time">{{ formatTime(appointment.time) }}</strong>
+          <strong class="time">
+            {{ formatTime(appointment.time) }}
+          </strong>
 
           <div class="work-details">
             <strong>{{ appointment.student }}</strong>
             <small>{{ appointment.type }}</small>
           </div>
 
-          <span class="status-badge" :class="appointment.status.toLowerCase()">
+          <span
+            class="status-badge"
+            :class="String(appointment.status || '').toLowerCase()"
+          >
             {{ appointment.status }}
           </span>
         </div>
@@ -100,7 +152,11 @@ function formatDate(date) {
           No appointments scheduled for today.
         </p>
 
-        <button class="text-button" @click="emit('navigate', 'Appointments')">
+        <button
+          type="button"
+          class="text-button"
+          @click="emit('navigate', 'Appointments')"
+        >
           View all appointments →
         </button>
       </article>
@@ -114,11 +170,18 @@ function formatDate(date) {
           class="recent-row"
         >
           <div>
-            <strong>{{ appointment.student }} · {{ appointment.type }}</strong>
-            <small>{{ appointment.reference }} · {{ formatDate(appointment.date) }}</small>
+            <strong>
+              {{ appointment.student }} · {{ appointment.type }}
+            </strong>
+            <small>
+              {{ appointment.reference }} · {{ formatDate(appointment.date) }}
+            </small>
           </div>
 
-          <span class="status-badge" :class="appointment.status.toLowerCase()">
+          <span
+            class="status-badge"
+            :class="String(appointment.status || '').toLowerCase()"
+          >
             {{ appointment.status }}
           </span>
         </div>
@@ -127,7 +190,11 @@ function formatDate(date) {
           No recent work available.
         </p>
 
-        <button class="text-button" @click="emit('navigate', 'History')">
+        <button
+          type="button"
+          class="text-button"
+          @click="emit('navigate', 'History')"
+        >
           View history →
         </button>
       </article>

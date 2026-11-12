@@ -28,6 +28,7 @@ const filters = [
   'All',
   'Pending',
   'Confirmed',
+  'Ready for Pickup',
   'Completed',
   'Cancelled',
   'No-show'
@@ -55,13 +56,24 @@ function formatDate(date, time) {
   const dateText = parsedDate.toLocaleDateString('en-US', {
     month: 'long',
     day: 'numeric',
-    year: 'numeric',
-    timeZone: 'Asia/Manila'
+    year: 'numeric'
   })
 
   if (!time) return dateText
 
-  const [hour, minute] = time.split(':').map(Number)
+  // Accept both "10:30" and "10:30 AM" formats.
+  const timeText = String(time).trim()
+
+  if (/AM|PM/i.test(timeText)) {
+    return `${dateText} · ${timeText}`
+  }
+
+  const [hour, minute] = timeText.split(':').map(Number)
+
+  if (Number.isNaN(hour) || Number.isNaN(minute)) {
+    return `${dateText} · ${timeText}`
+  }
+
   const formattedTime =
     `${hour % 12 || 12}:${String(minute).padStart(2, '0')} ` +
     `${hour >= 12 ? 'PM' : 'AM'}`
@@ -69,40 +81,69 @@ function formatDate(date, time) {
   return `${dateText} · ${formattedTime}`
 }
 
-/*
-  Display only Angel Dadole's Counseling Session.
-  Use the appointment passed from App.vue when available.
-*/
-const visibleAppointments = computed(() => {
-  const angelAppointment = props.appointments.find(item =>
-    item.student?.toLowerCase() === 'angel dadole' &&
-    item.type?.toLowerCase() === 'counseling session'
-  )
+function normalizeStatus(status) {
+  const value = String(status || '').trim().toLowerCase()
 
-  // Fallback data so the card remains visible while App.vue is being updated.
-  const appointment = angelAppointment || {
-    id: 2,
-    student: 'Angel Dadole',
-    type: 'Counseling Session',
-    reference: 'GDN-2026-0055',
-    date: '2026-10-05',
-    time: '10:15',
-    status: 'Confirmed'
+  const statusMap = {
+    pending: 'Pending',
+    confirmed: 'Confirmed',
+    reschedule_requested: 'Reschedule Requested',
+    'reschedule requested': 'Reschedule Requested',
+    completed: 'Completed',
+    cancelled: 'Cancelled',
+    rejected: 'Rejected',
+    no_show: 'No-show',
+    'no-show': 'No-show'
   }
 
-  const search = props.searchText.trim().toLowerCase()
+  return statusMap[value] || status || 'Pending'
+}
 
-  const matchesFilter =
-    selectedFilter.value === 'All' ||
-    appointment.status === selectedFilter.value
+const visibleAppointments = computed(() => {
+  const search = String(props.searchText || '').trim().toLowerCase()
 
-  const matchesSearch =
-    !search ||
-    appointment.student.toLowerCase().includes(search) ||
-    appointment.type.toLowerCase().includes(search) ||
-    appointment.reference.toLowerCase().includes(search)
+  return props.appointments
+    .map(appointment => ({
+      ...appointment,
+      status: normalizeStatus(appointment.status)
+    }))
+    .filter(appointment => {
+      const matchesFilter =
+        selectedFilter.value === 'All' ||
+        (
+          selectedFilter.value === 'Ready for Pickup'
+            ? appointment.status === 'Reschedule Requested'
+            : appointment.status === selectedFilter.value
+        )
 
-  return matchesFilter && matchesSearch ? [appointment] : []
+      const searchableText = [
+        appointment.student,
+        appointment.studentId,
+        appointment.type,
+        appointment.reference,
+        appointment.purpose,
+        appointment.status
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+
+      const matchesSearch =
+        !search || searchableText.includes(search)
+
+      return matchesFilter && matchesSearch
+    })
+    .sort((a, b) => {
+      const dateA = new Date(
+        a.scheduledAt || `${a.date}T${a.time || '00:00'}`
+      )
+
+      const dateB = new Date(
+        b.scheduledAt || `${b.date}T${b.time || '00:00'}`
+      )
+
+      return dateA - dateB
+    })
 })
 
 function handleAction(appointment, action) {
@@ -119,7 +160,7 @@ function handleAction(appointment, action) {
   <section class="appointments-page">
     <header class="page-heading">
       <h1>Appointments</h1>
-      <p>Confirm, reschedule and complete Library Appointments</p>
+      <p>Confirm, reschedule and complete Guidance Appointments</p>
     </header>
 
     <nav class="filter-list" aria-label="Appointment status filters">
@@ -149,22 +190,42 @@ function handleAction(appointment, action) {
 
           <span
             class="status-badge"
-            :class="appointment.status.toLowerCase().replace(/\s+/g, '-')"
+            :class="appointment.status.toLowerCase().replace(/\s+/g, '-').replace(/_/g, '-')"
           >
             {{ appointment.status }}
           </span>
         </div>
 
         <h2>
-          {{ appointment.student }} · {{ appointment.type }}
+          {{ appointment.student || 'Unknown Student' }}
+          ·
+          {{ appointment.type || 'Guidance Appointment' }}
         </h2>
 
+        <p v-if="appointment.studentId" class="appointment-detail">
+          Student ID: {{ appointment.studentId }}
+        </p>
+
         <p class="appointment-reference">
-          {{ appointment.reference }}
+          {{ appointment.reference || appointment.id }}
+        </p>
+
+        <p v-if="appointment.purpose" class="appointment-purpose">
+          <strong>Purpose:</strong> {{ appointment.purpose }}
         </p>
 
         <div class="appointment-actions">
           <button
+            v-if="appointment.status === 'Pending' || appointment.status === 'Reschedule Requested'"
+            type="button"
+            class="action-button"
+            @click="handleAction(appointment, 'Confirm')"
+          >
+            Confirm
+          </button>
+
+          <button
+            v-if="appointment.status === 'Confirmed'"
             type="button"
             class="action-button"
             @click="handleAction(appointment, 'Reschedule')"
@@ -173,6 +234,7 @@ function handleAction(appointment, action) {
           </button>
 
           <button
+            v-if="appointment.status === 'Confirmed'"
             type="button"
             class="action-button"
             @click="handleAction(appointment, 'Complete')"
@@ -181,6 +243,7 @@ function handleAction(appointment, action) {
           </button>
 
           <button
+            v-if="appointment.status !== 'Completed' && appointment.status !== 'Cancelled' && appointment.status !== 'No-show' && appointment.status !== 'Rejected'"
             type="button"
             class="action-button"
             @click="handleAction(appointment, 'Cancel')"
@@ -189,6 +252,7 @@ function handleAction(appointment, action) {
           </button>
 
           <button
+            v-if="appointment.status === 'Confirmed'"
             type="button"
             class="action-button"
             @click="handleAction(appointment, 'No-show')"
@@ -202,8 +266,7 @@ function handleAction(appointment, action) {
     <div v-else class="empty-state">
       <h2>No appointments found</h2>
       <p>
-        Angel Dadole's Counseling Session has no appointment matching
-        this filter.
+        There are currently no appointments matching this filter or search.
       </p>
     </div>
   </section>
@@ -254,6 +317,7 @@ function handleAction(appointment, action) {
   font-size: 14px;
   font-weight: 600;
   white-space: nowrap;
+  cursor: pointer;
   transition: background 0.15s ease;
 }
 
@@ -319,12 +383,14 @@ function handleAction(appointment, action) {
 }
 
 .status-badge.cancelled,
-.status-badge.no-show {
+.status-badge.no-show,
+.status-badge.rejected {
   color: #912e36;
   background: #f3d5d7;
 }
 
-.status-badge.pending {
+.status-badge.pending,
+.status-badge.reschedule-requested {
   color: #75551a;
   background: #f2e5c8;
 }
@@ -338,11 +404,24 @@ function handleAction(appointment, action) {
   line-height: 1.4;
 }
 
+.appointment-detail {
+  margin: 3px 0;
+  color: #594545;
+  font-size: 12px;
+}
+
 .appointment-reference {
   margin: 0 0 12px 4px;
   color: #382426;
   font-size: 11px;
   line-height: 1.4;
+}
+
+.appointment-purpose {
+  margin: 0 0 12px;
+  color: #594545;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .appointment-actions {
@@ -366,6 +445,7 @@ function handleAction(appointment, action) {
   font-size: 14px;
   font-weight: 600;
   white-space: nowrap;
+  cursor: pointer;
   transition: background 0.15s ease;
 }
 

@@ -1,4 +1,4 @@
-```vue
+
 <script setup>
 import { ref } from 'vue'
 
@@ -9,22 +9,63 @@ const password = ref('')
 const showPassword = ref(false)
 const keepSignedIn = ref(false)
 const errorMessage = ref('')
+const isLoading = ref(false)
 
-function signIn() {
+async function signIn() {
   errorMessage.value = ''
 
   if (!email.value.trim() || !password.value) {
-    errorMessage.value = 'Please enter your university email and password.'
+    errorMessage.value =
+      'Please enter your university email and password.'
     return
   }
 
-  // Temporary sign-in for frontend testing only.
-  // Authentication will be connected later.
-  emit('login')
+  if (isLoading.value) return
+
+  isLoading.value = true
+
+  try {
+    const response = await fetch(
+      'http://localhost:3000/api/auth/guidance-login',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          email: email.value.trim(),
+          password: password.value
+        })
+      }
+    )
+
+    const result = await response.json()
+
+    if (!response.ok || !result.success) {
+      errorMessage.value =
+        result.message || 'Login failed. Please try again.'
+      return
+    }
+
+    emit('login', {
+      user: result.user,
+      session: result.session,
+      keepSignedIn: keepSignedIn.value
+    })
+
+  } catch (error) {
+    console.error('Login error:', error)
+
+    errorMessage.value =
+      'Unable to connect to the server. Please check if the backend is running.'
+  } finally {
+    isLoading.value = false
+  }
 }
 
 function forgotPassword() {
-  errorMessage.value = 'Please contact the Guidance Office administrator to reset your password.'
+  errorMessage.value =
+    'Please contact the Guidance Office administrator to reset your password.'
 }
 </script>
 
@@ -57,6 +98,7 @@ function forgotPassword() {
 
         <form class="login-card" @submit.prevent="signIn">
           <label for="email">University Email</label>
+
           <input
             id="email"
             v-model="email"
@@ -67,6 +109,7 @@ function forgotPassword() {
           />
 
           <label for="password">Password</label>
+
           <div class="password-field">
             <input
               id="password"
@@ -76,6 +119,7 @@ function forgotPassword() {
               autocomplete="current-password"
               required
             />
+
             <button
               type="button"
               class="show-button"
@@ -87,7 +131,10 @@ function forgotPassword() {
 
           <div class="form-options">
             <label class="remember-option">
-              <input v-model="keepSignedIn" type="checkbox" />
+              <input
+                v-model="keepSignedIn"
+                type="checkbox"
+              />
               <span>Keep me signed in</span>
             </label>
 
@@ -104,8 +151,12 @@ function forgotPassword() {
             {{ errorMessage }}
           </p>
 
-          <button type="submit" class="sign-in-button">
-            Sign In
+          <button
+            type="submit"
+            class="sign-in-button"
+            :disabled="isLoading"
+          >
+            {{ isLoading ? 'Signing in...' : 'Sign In' }}
           </button>
         </form>
 
@@ -318,6 +369,7 @@ function forgotPassword() {
   background: transparent;
   border: 0;
   font-size: 10px;
+  cursor: pointer;
 }
 
 .form-options {
@@ -349,6 +401,7 @@ function forgotPassword() {
   background: transparent;
   border: 0;
   font-size: 10px;
+  cursor: pointer;
 }
 
 .forgot-button:hover {
@@ -364,10 +417,16 @@ function forgotPassword() {
   border-radius: 14px;
   font-size: 12px;
   font-weight: bold;
+  cursor: pointer;
 }
 
-.sign-in-button:hover {
+.sign-in-button:hover:not(:disabled) {
   background: #7b1721;
+}
+
+.sign-in-button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
 
 .error-message {

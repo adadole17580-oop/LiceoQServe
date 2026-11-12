@@ -1,60 +1,92 @@
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 
-const students = ref([
-  {
-    id: 1,
-    name: 'Rainier Amparo',
-    studentId: '2024-112030',
-    course: 'BS Information Technology',
-    year: '3rd Year',
-    email: 'rainier.amparo@liceo.edu.ph',
-    contact: '+63 917 025 0204',
-    activeTransactions: [
-      {
-        title: 'Guidance — Career Guidance',
-        status: 'Rescheduled'
-      }
-    ],
-    history: [
-      {
-        title: 'Career Guidance Session',
-        date: 'Oct. 6, 2026 · 10:15 AM',
-        status: 'Completed'
-      }
-    ]
-  },
-  {
-    id: 2,
-    name: 'Angel Dadole',
-    studentId: '2024-122805',
-    course: 'BS Information Technology',
-    year: '3rd Year',
-    email: 'angel.dadole@liceo.edu.ph',
-    contact: '+63 911 143 6269',
-    activeTransactions: [
-      {
-        title: 'Guidance — Counseling Session',
-        status: 'Pending'
-      }
-    ],
-    history: []
-  },
-  {
-    id: 3,
-    name: 'Chloe Monteza',
-    studentId: '2024-120331',
-    course: 'BS Computer Science',
-    year: '4th Year',
-    email: 'chloe.monteza@liceo.edu.ph',
-    contact: '+63 916 620 8041',
-    activeTransactions: [],
-    history: []
+const props = defineProps({
+  accessToken: {
+    type: String,
+    required: true
   }
-])
+})
 
+const API_BASE_URL = 'http://localhost:3000'
+
+const students = ref([])
 const selectedStudent = ref(null)
+const loading = ref(false)
+const errorMessage = ref('')
+
+function formatDate(value) {
+  if (!value) return 'N/A'
+
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) return value
+
+  return date.toLocaleString('en-US', {
+    timeZone: 'Asia/Manila',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  })
+}
+
+async function loadStudents() {
+  loading.value = true
+  errorMessage.value = ''
+
+  try {
+    if (!props.accessToken) {
+      throw new Error('No login token found. Please log in again.')
+    }
+
+    const response = await fetch(
+      `${API_BASE_URL}/api/guidance/students`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${props.accessToken}`
+        }
+      }
+    )
+
+    const result = await response.json()
+
+    if (!response.ok || !result.success) {
+      throw new Error(
+        result.message || `Request failed (${response.status})`
+      )
+    }
+
+    students.value = (result.students || []).map(student => ({
+      ...student,
+
+      activeTransactions: (student.activeTransactions || []).map(item => ({
+        ...item,
+        title: item.title || 'Guidance Transaction',
+        status: item.status || 'Pending',
+        date: formatDate(item.date)
+      })),
+
+      history: (student.history || []).map(item => ({
+        ...item,
+        title: item.title || 'Guidance Transaction',
+        status: item.status || 'N/A',
+        date: formatDate(item.date)
+      }))
+    }))
+
+    console.log('Guidance students loaded:', students.value)
+
+  } catch (error) {
+    console.error('Failed to load students:', error)
+    errorMessage.value = error.message || 'Unable to load students.'
+  } finally {
+    loading.value = false
+  }
+}
 
 function viewDetails(student) {
   selectedStudent.value = student
@@ -63,17 +95,38 @@ function viewDetails(student) {
 function closeDetails() {
   selectedStudent.value = null
 }
+
+onMounted(() => {
+  loadStudents()
+})
 </script>
 
 <template>
   <section class="students-page">
+
+    <!-- Page Heading -->
     <header class="page-heading">
       <h1>Manage Students</h1>
       <p>Student library records by name or student ID.</p>
     </header>
 
-    <!-- Student table: search bar removed -->
-    <div class="students-table-wrapper">
+    <!-- Loading -->
+    <p v-if="loading" class="empty-message">
+      Loading students...
+    </p>
+
+    <!-- Error -->
+    <p v-else-if="errorMessage" class="empty-message">
+      {{ errorMessage }}
+    </p>
+
+    <!-- No Students -->
+    <p v-else-if="students.length === 0" class="empty-message">
+      No students found.
+    </p>
+
+    <!-- Student Table -->
+    <div v-else class="students-table-wrapper">
       <table class="students-table">
         <thead>
           <tr>
@@ -120,7 +173,7 @@ function closeDetails() {
       </table>
     </div>
 
-    <!-- Student details modal -->
+    <!-- Student Details Modal -->
     <Teleport to="body">
       <div
         v-if="selectedStudent"
@@ -133,9 +186,12 @@ function closeDetails() {
           aria-modal="true"
           aria-labelledby="student-details-title"
         >
+
+          <!-- Modal Header -->
           <header class="details-header">
             <div>
               <p class="eyebrow">STUDENT DETAILS</p>
+
               <h2 id="student-details-title">
                 {{ selectedStudent.name }}
               </h2>
@@ -152,10 +208,13 @@ function closeDetails() {
           </header>
 
           <div class="details-content">
+
+            <!-- Personal Information -->
             <section class="information-section">
               <h3>Personal Information</h3>
 
               <div class="information-grid">
+
                 <div class="information-item">
                   <span>Full Name</span>
                   <strong>{{ selectedStudent.name }}</strong>
@@ -185,9 +244,11 @@ function closeDetails() {
                   <span>Contact Number</span>
                   <strong>{{ selectedStudent.contact }}</strong>
                 </div>
+
               </div>
             </section>
 
+            <!-- Active Transactions -->
             <section class="transactions-section">
               <h3>Current Active Transactions</h3>
 
@@ -197,11 +258,16 @@ function closeDetails() {
               >
                 <article
                   v-for="(transaction, index) in selectedStudent.activeTransactions"
-                  :key="index"
+                  :key="transaction.id || index"
                   class="transaction-item active-transaction"
                 >
-                  <span>{{ transaction.title }}</span>
-                  <strong>{{ transaction.status }}</strong>
+                  <span>
+                    {{ transaction.title }}
+                  </span>
+
+                  <strong>
+                    {{ transaction.status }}
+                  </strong>
                 </article>
               </div>
 
@@ -210,6 +276,7 @@ function closeDetails() {
               </p>
             </section>
 
+            <!-- Transaction History -->
             <section class="transactions-section history-section">
               <h3>Transaction History</h3>
 
@@ -219,17 +286,22 @@ function closeDetails() {
               >
                 <article
                   v-for="(transaction, index) in selectedStudent.history"
-                  :key="index"
+                  :key="transaction.id || index"
                   class="transaction-item history-item"
                 >
                   <div>
-                    <strong>{{ transaction.title }}</strong>
-                    <p>{{ transaction.date }}</p>
+                    <strong>
+                      {{ transaction.title }}
+                    </strong>
+
+                    <p>
+                      {{ transaction.date }}
+                    </p>
                   </div>
 
                   <strong
                     class="history-status"
-                    :class="transaction.status.toLowerCase()"
+                    :class="transaction.status.toLowerCase().replace(/\s+/g, '-')"
                   >
                     {{ transaction.status }}
                   </strong>
@@ -240,12 +312,12 @@ function closeDetails() {
                 No transaction history available.
               </p>
             </section>
-          </div>
 
-          <!-- Removed the bottom Close Details button -->
+          </div>
         </section>
       </div>
     </Teleport>
+
   </section>
 </template>
 
@@ -332,13 +404,15 @@ function closeDetails() {
   border: none;
   font-size: 13px;
   white-space: nowrap;
+  cursor: pointer;
 }
 
 .view-details-button:hover {
   text-decoration: underline;
 }
 
-/* Details modal */
+/* Details Modal */
+
 .details-overlay {
   position: fixed;
   inset: 0;
@@ -395,6 +469,7 @@ function closeDetails() {
   background: transparent;
   border: none;
   font-size: 14px;
+  cursor: pointer;
 }
 
 .close-top-button:hover {
@@ -491,7 +566,8 @@ function closeDetails() {
 }
 
 .history-status.cancelled,
-.history-status.no-show {
+.history-status.no-show,
+.history-status.rejected {
   color: #a4000b;
 }
 
