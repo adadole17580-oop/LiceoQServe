@@ -103,8 +103,23 @@
           </div>
 
           <div class="detail-group">
+            <label>Service</label>
+            <p>{{ selectedRecord.serviceName }}</p>
+          </div>
+
+          <div class="detail-group">
+            <label>Previous status</label>
+            <p>{{ selectedRecord.previousStatus }}</p>
+          </div>
+
+          <div class="detail-group">
             <label>Final status</label>
             <p>{{ selectedRecord.finalStatus }}</p>
+          </div>
+
+          <div class="detail-group">
+            <label>Performed by</label>
+            <p>{{ selectedRecord.performedBy }}</p>
           </div>
         </div>
 
@@ -123,11 +138,20 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { supabase } from '../../lib/supabase'
+
+const REGISTRAR_SERVICE_IDS = [
+  '33f59554-67be-4f04-87ab-dc27cd56fa94',
+  '6a14093e-89a9-45ab-b1b8-1b2235459e5a',
+  '7cbd715f-1e2b-4c29-8f12-7f8e8c2e4441',
+  'ce8513bc-cd47-401e-96b0-503a4ebc1129',
+]
 
 const historyRecords = ref([])
 const selectedRecord = ref(null)
+
+let historyChannel = null
 
 function formatDate(date) {
   if (!date) return 'Date unavailable'
@@ -159,7 +183,9 @@ async function loadHistory() {
         transaction_type,
         transaction_id,
         title,
+        previous_status,
         final_status,
+        performed_by,
         completed_at,
         created_at,
         student:profiles!service_history_student_id_fkey (
@@ -171,6 +197,7 @@ async function loadHistory() {
           office_id
         )
       `)
+      .in('service_id', REGISTRAR_SERVICE_IDS)
       .order('created_at', { ascending: false })
 
     if (error) throw error
@@ -180,28 +207,67 @@ async function loadHistory() {
 
       return {
         id: item.id,
-        title: item.title,
+        title: item.title || 'Untitled activity',
         date: formatDate(activityDate),
         time: formatTime(activityDate),
         student: item.student?.full_name || 'Unknown student',
         studentNumber: item.student?.student_id || 'Not available',
-        transactionType: item.transaction_type,
-        transactionId: item.transaction_id,
-        finalStatus: item.final_status,
+        transactionType: item.transaction_type || 'Not available',
+        transactionId: item.transaction_id || 'Not available',
+        finalStatus: item.final_status || 'Not available',
+        previousStatus: item.previous_status || 'Not available',
+        performedBy: item.performed_by || 'Not available',
         serviceName: item.service?.name || 'Not available',
+        createdAt: item.created_at,
       }
     })
+
+    if (
+      selectedRecord.value &&
+      !historyRecords.value.some(
+        (record) => record.id === selectedRecord.value.id
+      )
+    ) {
+      selectedRecord.value = null
+    }
   } catch (error) {
-    console.error('Error loading history:', error)
+    console.error('Error loading Registrar history:', error)
   }
+}
+
+function subscribeToHistory() {
+  historyChannel = supabase
+    .channel('registrar-service-history')
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'service_history',
+      },
+      () => {
+        loadHistory()
+      }
+    )
+    .subscribe((status) => {
+      console.log('Registrar history Realtime status:', status)
+    })
 }
 
 function viewDetails(record) {
   selectedRecord.value = record
 }
 
-onMounted(() => {
-  loadHistory()
+onMounted(async () => {
+  await loadHistory()
+  subscribeToHistory()
+})
+
+onUnmounted(() => {
+  if (historyChannel) {
+    supabase.removeChannel(historyChannel)
+    historyChannel = null
+  }
 })
 </script>
 
@@ -229,7 +295,6 @@ onMounted(() => {
   font-size: 14px;
 }
 
-/* Heading now matches Notifications and Appointments */
 .page-heading {
   margin-bottom: 22px;
 }

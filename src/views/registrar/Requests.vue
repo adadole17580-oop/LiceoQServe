@@ -1,4 +1,3 @@
-
 <template>
   <div class="requests-page">
     <div class="page-heading">
@@ -6,6 +5,7 @@
       <p>Update status, expected completion, and transaction-specific instructions.</p>
     </div>
 
+    <!-- STATUS FILTERS -->
     <div class="status-filters">
       <button
         v-for="status in statuses"
@@ -23,16 +23,29 @@
       </button>
     </div>
 
+    <!-- SORT AND REFRESH -->
     <div class="sort-row">
       <label for="request-sort">Sort by</label>
+
       <select id="request-sort" v-model="sortBy">
         <option value="expected">Expected completion</option>
         <option value="oldest">Oldest</option>
         <option value="updated">Recently updated</option>
       </select>
+
+      <button
+        type="button"
+        class="refresh-button"
+        :disabled="loading"
+        @click="loadRequests"
+      >
+        {{ loading ? 'Refreshing...' : 'Refresh' }}
+      </button>
     </div>
 
+    <!-- MAIN LAYOUT -->
     <section class="requests-layout">
+      <!-- LEFT: REQUEST LIST -->
       <div class="request-list-panel">
         <div class="panel-heading">
           <h2>Requests</h2>
@@ -47,7 +60,11 @@
           <div v-else-if="loadError" class="empty-state">
             <h2>Unable to load requests</h2>
             <p>{{ loadError }}</p>
-            <button class="action-button secondary" @click="loadRequests">
+            <button
+              type="button"
+              class="action-button secondary"
+              @click="loadRequests"
+            >
               Try Again
             </button>
           </div>
@@ -55,9 +72,11 @@
           <template v-else>
             <article
               v-for="request in filteredRequests"
-              :key="request.id"
+              :key="request.databaseId"
               class="request-card"
-              :class="{ selected: selectedRequest?.id === request.id }"
+              :class="{
+                selected: selectedRequest?.databaseId === request.databaseId
+              }"
               role="button"
               tabindex="0"
               @click="selectRequest(request)"
@@ -65,14 +84,24 @@
               @keydown.space.prevent="selectRequest(request)"
             >
               <div class="request-topline">
-                <span class="request-student">{{ request.studentName }}</span>
-                <span class="status-badge" :class="statusClass(request.status)">
+                <span class="request-student">
+                  {{ request.studentName }}
+                </span>
+
+                <span
+                  class="status-badge"
+                  :class="statusClass(request.status)"
+                >
                   {{ request.status }}
                 </span>
               </div>
 
               <p class="request-description">
-                {{ request.id }} · {{ request.documentType }}
+                {{ request.reference }} · {{ request.documentType }}
+              </p>
+
+              <p class="request-date">
+                Submitted: {{ formatDateTime(request.createdAt) }}
               </p>
 
               <p class="request-date">
@@ -84,6 +113,7 @@
               <div class="empty-symbol">▦</div>
               <h2>No requests found</h2>
               <p>There are no requests under this status.</p>
+
               <button
                 type="button"
                 class="action-button secondary"
@@ -96,82 +126,92 @@
         </div>
       </div>
 
+      <!-- RIGHT: REQUEST DETAILS -->
       <div class="request-details-panel">
         <template v-if="selectedRequest">
-          <div class="details-topline">
+          <!-- DETAILS HEADER -->
+          <div class="details-header">
             <div>
               <span class="details-eyebrow">REQUEST DETAILS</span>
-              <h2>{{ selectedRequest.studentName }}</h2>
+              <h2>{{ selectedRequest.title }}</h2>
               <p class="details-subtitle">
-                {{ selectedRequest.id }} · {{ selectedRequest.documentType }}
+                {{ selectedRequest.reference }} ·
+                {{ selectedRequest.documentType }}
               </p>
             </div>
 
             <button
               type="button"
               class="close-button"
-              aria-label="Close request details"
-              @click="selectedRequest = null"
+              :disabled="saving"
+              @click="closeDetails"
             >
-              ×
+              Close
             </button>
           </div>
 
+          <!-- STUDENT INFORMATION -->
           <div class="details-section">
-            <h3>Student information</h3>
-
             <div class="information-grid">
               <div class="information-item">
-                <span class="field-label">Student name</span>
-                <span class="field-value">{{ selectedRequest.studentName }}</span>
+                <span class="field-label">Student</span>
+                <strong class="field-value">
+                  {{ selectedRequest.studentName }}
+                </strong>
               </div>
 
               <div class="information-item">
                 <span class="field-label">Student ID</span>
-                <span class="field-value">{{ selectedRequest.studentId }}</span>
+                <strong class="field-value">
+                  {{ selectedRequest.studentId }}
+                </strong>
               </div>
             </div>
           </div>
 
+          <!-- REQUEST INFORMATION -->
           <div class="details-section">
-            <h3>Request information</h3>
+            <div class="information-grid">
+              <div class="information-item">
+                <span class="field-label">Request number</span>
+                <strong class="field-value">
+                  {{ selectedRequest.reference }}
+                </strong>
+              </div>
 
-            <div class="information-item request-number">
-              <span class="field-label">Request number</span>
-              <span class="field-value">{{ selectedRequest.id }}</span>
+              <div class="information-item">
+                <span class="field-label">Expected completion</span>
+                <strong class="field-value">
+                  {{ formatDate(selectedRequest.expectedCompletion) }}
+                </strong>
+              </div>
             </div>
 
-            <div class="form-field">
-              <label for="request-status">Status</label>
-              <select id="request-status" v-model="selectedRequest.status">
-                <option
-                  v-for="status in requestStatuses"
-                  :key="status"
-                  :value="status"
-                >
-                  {{ status }}
-                </option>
-              </select>
-            </div>
+            <div class="form-field expected-field">
+              <label for="expected-completion">
+                Expected completion date
+              </label>
 
-            <div class="form-field">
-              <label for="expected-completion">Expected completion date</label>
               <input
                 id="expected-completion"
                 v-model="selectedRequest.expectedCompletion"
                 type="date"
+                :disabled="saving"
               />
             </div>
           </div>
 
-          <div class="details-section">
-            <h3>Transaction-specific instructions</h3>
-
+          <!-- INSTRUCTIONS -->
+          <div class="instructions-section">
             <div class="form-field">
-              <label for="instruction-template">Instruction template</label>
+              <label for="instruction-template">
+                Instruction template
+              </label>
+
               <select
                 id="instruction-template"
                 v-model="selectedRequest.instructionTemplate"
+                :disabled="saving"
                 @change="applyTemplate"
               >
                 <option value="">Choose a template</option>
@@ -181,48 +221,74 @@
               </select>
             </div>
 
-            <div class="form-field">
-              <label for="custom-instructions">Custom instructions</label>
+            <div class="form-field custom-instructions-field">
+              <label for="custom-instructions">
+                Custom instructions
+              </label>
+
               <textarea
                 id="custom-instructions"
                 v-model="selectedRequest.instructions"
-                rows="4"
+                :disabled="saving"
+                rows="5"
                 placeholder="Enter instructions for the student..."
               ></textarea>
+
+              <span class="textarea-hint">
+                Write a message for the student. You can resize this box.
+              </span>
             </div>
 
-            <p
+            <!-- LAST RECORDED -->
+            <div
               v-if="selectedRequest.instructionsSentAt"
               class="instruction-history"
             >
-              <span class="history-dot"></span>
-              Instructions last recorded:
-              {{ formatDateTime(selectedRequest.instructionsSentAt) }}
-            </p>
+              <span class="history-label">Last recorded:</span>
+              <strong>
+                {{ formatDateTime(selectedRequest.instructionsSentAt) }}
+              </strong>
+            </div>
+
+            <!-- SAVE AND NOTIFY -->
+            <button
+              type="button"
+              class="save-notify-button"
+              :disabled="saving"
+              @click="saveChanges(true)"
+            >
+              {{ saving ? 'Saving...' : 'Save and notify student' }}
+            </button>
           </div>
 
-          <p v-if="message" class="save-message" role="status">
+          <!-- STATUS BUTTONS -->
+          <div class="status-actions-section">
+            <div class="status-action-buttons">
+              <button
+                v-for="status in requestStatuses"
+                :key="status"
+                type="button"
+                class="status-action-button"
+                :class="{
+                  'current-status': selectedRequest.status === status
+                }"
+                :disabled="saving || selectedRequest.status === status"
+                @click="requestStatusChange(status)"
+              >
+                {{ status }}
+              </button>
+            </div>
+          </div>
+
+          <!-- SAVE FEEDBACK -->
+          <p
+            v-if="message"
+            class="save-message"
+            :class="{ error: messageType === 'error' }"
+            role="status"
+          >
             {{ message }}
           </p>
-
-          <div class="details-actions">
-            <button
-              type="button"
-              class="action-button secondary"
-              @click="selectedRequest = null"
-            >
-              Close
-            </button>
-
-            <button
-              type="button"
-              class="action-button primary"
-              :disabled="saving"
-              @click="saveChanges"
-            >
-              {{ saving ? 'Saving...' : 'Save Changes' }}
-            </button>
-          </div>
         </template>
 
         <div v-else class="details-empty-state">
@@ -232,10 +298,69 @@
       </div>
     </section>
 
-    <div v-if="message && !selectedRequest" class="feedback-message" role="status">
+    <!-- STATUS CONFIRMATION POPUP -->
+    <Transition name="modal">
+      <div
+        v-if="showStatusConfirmation"
+        class="confirmation-overlay"
+        @click.self="cancelStatusChange"
+      >
+        <div
+          class="confirmation-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="confirmation-title"
+        >
+          <div class="confirmation-heading">
+            <div class="confirmation-icon">!</div>
+
+            <h2 id="confirmation-title">
+              Change Status to {{ pendingStatus }}?
+            </h2>
+          </div>
+
+          <p>
+            The request timeline will update and the student will receive
+            a notification.
+          </p>
+
+          <div class="confirmation-actions">
+            <button
+              type="button"
+              class="action-button secondary"
+              :disabled="saving"
+              @click="cancelStatusChange"
+            >
+              Go Back
+            </button>
+
+            <button
+              type="button"
+              class="action-button primary"
+              :disabled="saving"
+              @click="confirmStatusChange"
+            >
+              {{ saving ? 'Updating...' : 'Confirm status change' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- FEEDBACK TOAST -->
+    <div
+      v-if="message && !selectedRequest"
+      class="feedback-message"
+      role="status"
+    >
       <span>✓</span>
       {{ message }}
-      <button type="button" aria-label="Dismiss" @click="message = ''">
+
+      <button
+        type="button"
+        aria-label="Dismiss"
+        @click="message = ''"
+      >
         ×
       </button>
     </div>
@@ -246,7 +371,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { supabase } from '../../lib/supabase'
 
-const REGISTRAR_OFFICE_ID = '00409abc-cb88-480e-bdc0-5b94ac322ae7'
+const REGISTRAR_OFFICE_ID =
+  '00409abc-cb88-480e-bdc0-5b94ac322ae7'
 
 const statuses = [
   'All',
@@ -266,19 +392,27 @@ const requestStatuses = [
 ]
 
 const templates = {
-  pickup: 'Bring your original school ID and request receipt.',
+  pickup: 'Bring your valid school ID and request receipt.',
   processing: 'Your request is being processed. Please wait for an update.',
   requirements: 'Please prepare the required documents for verification.'
 }
 
 const activeStatus = ref('All')
 const sortBy = ref('expected')
+
 const selectedRequest = ref(null)
 const requests = ref([])
+
 const message = ref('')
+const messageType = ref('success')
+
 const loading = ref(false)
 const saving = ref(false)
 const loadError = ref('')
+
+const showStatusConfirmation = ref(false)
+const pendingStatus = ref('')
+const previousStatus = ref('')
 
 const filteredRequests = computed(() => {
   const result = requests.value.filter(request =>
@@ -288,11 +422,11 @@ const filteredRequests = computed(() => {
 
   return [...result].sort((a, b) => {
     if (sortBy.value === 'oldest') {
-      return a.createdAt.localeCompare(b.createdAt)
+      return (a.createdAt || '').localeCompare(b.createdAt || '')
     }
 
     if (sortBy.value === 'updated') {
-      return b.updatedAt.localeCompare(a.updatedAt)
+      return (b.updatedAt || '').localeCompare(a.updatedAt || '')
     }
 
     return (a.expectedCompletion || '9999-12-31')
@@ -300,12 +434,34 @@ const filteredRequests = computed(() => {
   })
 })
 
-function formatRequestNumber(number, createdAt) {
-  const year = createdAt
-    ? new Date(createdAt).getFullYear()
-    : new Date().getFullYear()
+function normalizeStatus(status) {
+  const value = (status || '')
+    .toLowerCase()
+    .replaceAll('_', ' ')
+    .trim()
 
-  return `REQ-${year}-${String(number).padStart(5, '0')}`
+  const statusMap = {
+    pending: 'Pending',
+    processing: 'Processing',
+    'in progress': 'Processing',
+    'ready for pickup': 'Ready for Pickup',
+    claimed: 'Claimed',
+    completed: 'Completed'
+  }
+
+  return statusMap[value] || formatStatus(status)
+}
+
+function formatStatus(status) {
+  if (!status) return 'Pending'
+
+  return status
+    .replaceAll('_', ' ')
+    .replace(/\b\w/g, letter => letter.toUpperCase())
+}
+
+function makeReference(id) {
+  return `REQ-${id.slice(0, 8).toUpperCase()}`
 }
 
 async function loadRequests() {
@@ -314,45 +470,69 @@ async function loadRequests() {
 
   try {
     const { data, error } = await supabase
-      .from('registrar_requests')
+      .from('service_requests')
       .select(`
         id,
-        request_number,
         student_id,
-        document_type,
+        service_id,
+        request_type,
+        title,
+        details,
         status,
+        staff_notes,
+        handled_by,
+        submitted_at,
+        updated_at,
+        completed_at,
         expected_completion,
         instructions,
         instruction_template,
         instructions_sent_at,
-        handled_by,
-        created_at,
-        updated_at,
         profiles:student_id (
           full_name,
           student_id
+        ),
+        office_services!inner (
+          id,
+          name,
+          office_id
         )
       `)
-      .eq('office_id', REGISTRAR_OFFICE_ID)
-      .order('created_at', { ascending: false })
+      .eq('office_services.office_id', REGISTRAR_OFFICE_ID)
+      .order('submitted_at', { ascending: false })
 
     if (error) throw error
 
     requests.value = (data || []).map(item => ({
-      id: formatRequestNumber(item.request_number, item.created_at),
       databaseId: item.id,
+      reference: makeReference(item.id),
+
       studentUuid: item.student_id,
       studentName: item.profiles?.full_name || 'Unknown Student',
       studentId: item.profiles?.student_id || 'Not available',
-      documentType: item.document_type,
-      status: item.status,
+
+      serviceId: item.service_id,
+      serviceName: item.office_services?.name || 'Registrar Service',
+
+      documentType: item.title || item.request_type || 'Service Request',
+      title: item.title || item.request_type || 'Service Request',
+
+      requestType: item.request_type || '',
+      details: item.details || '',
+
+      status: normalizeStatus(item.status),
+
       expectedCompletion: item.expected_completion || '',
       instructions: item.instructions || '',
       instructionTemplate: item.instruction_template || '',
       instructionsSentAt: item.instructions_sent_at || '',
-      handledBy: item.handled_by,
-      createdAt: item.created_at || '',
-      updatedAt: item.updated_at || ''
+
+      staffNotes: item.staff_notes || '',
+      handledBy: item.handled_by || null,
+
+      createdAt: item.submitted_at || '',
+      updatedAt: item.updated_at || '',
+      completedAt: item.completed_at || ''
     }))
 
     if (selectedRequest.value) {
@@ -360,10 +540,12 @@ async function loadRequests() {
         item => item.databaseId === selectedRequest.value.databaseId
       )
 
-      selectedRequest.value = refreshed || null
+      selectedRequest.value = refreshed ? { ...refreshed } : null
     }
+
+    console.log('Registrar service requests:', requests.value)
   } catch (error) {
-    console.error('Error loading registrar requests:', error)
+    console.error('Error loading Registrar service requests:', error)
     loadError.value = error.message || 'Unable to load requests.'
   } finally {
     loading.value = false
@@ -379,21 +561,52 @@ function setStatus(status) {
     status !== 'All' &&
     selectedRequest.value.status !== status
   ) {
-    selectedRequest.value = null
+    closeDetails()
   }
 }
 
 function countStatus(status) {
-  return requests.value.filter(request => request.status === status).length
+  return requests.value.filter(
+    request => request.status === status
+  ).length
 }
 
 function selectRequest(request) {
+  if (showStatusConfirmation.value || saving.value) return
+
   selectedRequest.value = { ...request }
   message.value = ''
 }
 
+function closeDetails() {
+  if (saving.value) return
+
+  cancelStatusChange()
+  selectedRequest.value = null
+  message.value = ''
+}
+
+function requestStatusChange(newStatus) {
+  if (!selectedRequest.value || saving.value) return
+  if (newStatus === selectedRequest.value.status) return
+
+  previousStatus.value = selectedRequest.value.status
+  pendingStatus.value = newStatus
+  showStatusConfirmation.value = true
+}
+
+function cancelStatusChange() {
+  if (saving.value) return
+
+  showStatusConfirmation.value = false
+  pendingStatus.value = ''
+  previousStatus.value = ''
+}
+
 function statusClass(status) {
-  return status.toLowerCase().replace(/\s+/g, '-')
+  return (status || '')
+    .toLowerCase()
+    .replace(/\s+/g, '-')
 }
 
 function formatDate(value) {
@@ -402,14 +615,14 @@ function formatDate(value) {
   const [year, month, day] = value.split('-').map(Number)
 
   return new Date(year, month - 1, day).toLocaleDateString('en-US', {
-    month: 'short',
+    month: 'long',
     day: 'numeric',
     year: 'numeric'
   })
 }
 
 function formatDateTime(value) {
-  if (!value) return ''
+  if (!value) return 'Not available'
 
   const date = new Date(value)
 
@@ -434,8 +647,40 @@ function applyTemplate() {
   }
 }
 
-async function saveChanges() {
-  if (!selectedRequest.value || saving.value) return
+async function confirmStatusChange() {
+  if (!selectedRequest.value || !pendingStatus.value || saving.value) return
+
+  const oldStatus = previousStatus.value
+  const newStatus = pendingStatus.value
+
+  selectedRequest.value.status = newStatus
+  showStatusConfirmation.value = false
+
+  // This saves the status. The database status trigger
+  // is responsible for the status-change notification.
+  const success = await saveChanges()
+
+  if (!success && selectedRequest.value) {
+    selectedRequest.value.status = oldStatus
+  }
+
+  pendingStatus.value = ''
+  previousStatus.value = ''
+}
+
+/*
+  SAVE CHANGES
+
+  saveChanges(true):
+  - Saves the request.
+  - Inserts a custom-instructions notification for the student.
+
+  saveChanges():
+  - Saves the request only.
+  - Used by the status confirmation flow.
+*/
+async function saveChanges(notifyStudent = false) {
+  if (!selectedRequest.value || saving.value) return false
 
   saving.value = true
   message.value = ''
@@ -445,38 +690,122 @@ async function saveChanges() {
       await supabase.auth.getUser()
 
     if (userError) throw userError
-    if (!userData.user) throw new Error('You must be logged in.')
+
+    if (!userData.user) {
+      throw new Error('You must be logged in.')
+    }
 
     const request = selectedRequest.value
-    const instructions = request.instructions.trim()
+    const instructions = (request.instructions || '').trim()
+    const now = new Date().toISOString()
 
-    const { error } = await supabase
-      .from('registrar_requests')
-      .update({
-        status: request.status,
-        expected_completion: request.expectedCompletion || null,
-        instructions,
-        instruction_template: request.instructionTemplate,
-        instructions_sent_at: instructions
-          ? new Date().toISOString()
-          : null,
-        handled_by: userData.user.id
-      })
+    // A message is required when notifying the student.
+    if (notifyStudent && !instructions) {
+      throw new Error(
+        'Please enter custom instructions before notifying the student.'
+      )
+    }
+
+    if (notifyStudent && !request.studentUuid) {
+      throw new Error(
+        'The student account could not be identified. The notification was not sent.'
+      )
+    }
+
+    const updateData = {
+      status: request.status.toLowerCase().replaceAll(' ', '_'),
+      expected_completion: request.expectedCompletion || null,
+      instructions,
+      instruction_template: request.instructionTemplate || null,
+
+      // Only update this timestamp when the admin sends instructions.
+      instructions_sent_at: notifyStudent
+        ? now
+        : request.instructionsSentAt || null,
+
+      staff_notes: request.staffNotes || null,
+      handled_by: userData.user.id,
+      updated_at: now,
+      completed_at:
+        request.status === 'Completed'
+          ? now
+          : null
+    }
+
+    // 1. SAVE THE SERVICE REQUEST.
+    const { data, error } = await supabase
+      .from('service_requests')
+      .update(updateData)
       .eq('id', request.databaseId)
-      .eq('office_id', REGISTRAR_OFFICE_ID)
+      .select('id')
 
     if (error) throw error
 
-    message.value = 'Request changes saved successfully.'
+    if (!data || data.length === 0) {
+      throw new Error(
+        'No request was updated. Please check your Supabase permissions.'
+      )
+    }
+
+    // 2. INSERT AN IN-APP NOTIFICATION FOR THE STUDENT.
+    if (notifyStudent) {
+      const notificationMessage =
+        `The Registrar has sent you new instructions for your service request "${request.title}": ${instructions}`
+
+      const { error: notificationError } = await supabase
+        .from('notifications')
+        .insert({
+          recipient_id: request.studentUuid,
+          title: 'New Instructions from Registrar',
+          message: notificationMessage,
+          category: 'request',
+          related_id: request.databaseId,
+          is_read: false,
+          created_at: now,
+          event_key: `service_request_instructions:${request.databaseId}:${crypto.randomUUID()}`
+        })
+
+      if (notificationError) {
+        console.error(
+          'Request saved, but notification insert failed:',
+          notificationError
+        )
+
+        throw new Error(
+          `The request was saved, but the student notification could not be created: ${notificationError.message}`
+        )
+      }
+    }
+
+    // 3. REFRESH THE REQUEST LIST.
+    const requestId = request.databaseId
 
     await loadRequests()
 
-    if (selectedRequest.value) {
-      message.value = 'Request changes saved successfully.'
-    }
+    const updatedRequest = requests.value.find(
+      item => item.databaseId === requestId
+    )
+
+    selectedRequest.value = updatedRequest
+      ? { ...updatedRequest }
+      : null
+
+    messageType.value = 'success'
+
+    message.value = notifyStudent
+      ? 'Instructions saved and student notified successfully.'
+      : 'Request changes saved successfully.'
+
+    return true
+
   } catch (error) {
-    console.error('Error saving request:', error)
+    console.error('Error saving Registrar request:', error)
+
+    messageType.value = 'error'
     message.value = error.message || 'Unable to save changes.'
+
+    return false
+
   } finally {
     saving.value = false
   }
@@ -513,6 +842,7 @@ onMounted(loadRequests)
   line-height: 1.5;
 }
 
+/* FILTERS */
 .status-filters {
   display: flex;
   align-items: center;
@@ -572,6 +902,7 @@ onMounted(loadRequests)
   color: #650b18;
 }
 
+/* SORT */
 .sort-row {
   display: flex;
   align-items: center;
@@ -592,10 +923,10 @@ onMounted(loadRequests)
   box-sizing: border-box;
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid #e2cbd0;
+  border: 1px solid #d9b9be;
   border-radius: 7px;
-  background: #fff;
-  color: #4c2026;
+  background: #f9f0f0;
+  color: #30080c;
   font-family: inherit;
   font-size: 13px;
 }
@@ -607,13 +938,17 @@ onMounted(loadRequests)
 
 .form-field select,
 .form-field input {
-  min-height: 40px;
+  min-height: 39px;
 }
 
 .form-field textarea {
-  min-height: 95px;
+  min-height: 120px;
   resize: vertical;
-  line-height: 1.5;
+  line-height: 1.6;
+}
+
+.form-field textarea::placeholder {
+  color: #b99fa3;
 }
 
 .sort-row select:focus,
@@ -624,6 +959,29 @@ onMounted(loadRequests)
   border-color: #9b515a;
 }
 
+.refresh-button {
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid #d9b9be;
+  border-radius: 7px;
+  background: #fff;
+  color: #650b18;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.refresh-button:hover {
+  background: #f3e3e5;
+}
+
+.refresh-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* MAIN LAYOUT */
 .requests-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -666,7 +1024,7 @@ onMounted(loadRequests)
 }
 
 .request-card {
-  padding: 15px 2px;
+  padding: 15px 9px;
   border-bottom: 1px solid #ead6d8;
   cursor: pointer;
   transition: background 0.15s;
@@ -682,8 +1040,6 @@ onMounted(loadRequests)
 }
 
 .request-card.selected {
-  padding-right: 9px;
-  padding-left: 9px;
   border-radius: 7px;
 }
 
@@ -705,15 +1061,17 @@ onMounted(loadRequests)
   color: #8b6268;
   font-size: 12px;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .request-date {
-  margin: 0;
+  margin: 3px 0 0;
   color: #765e62;
   font-size: 12px;
   line-height: 1.5;
 }
 
+/* STATUS BADGES */
 .status-badge {
   display: inline-flex;
   align-items: center;
@@ -742,33 +1100,34 @@ onMounted(loadRequests)
   color: #62595a;
 }
 
+/* DETAILS PANEL */
 .request-details-panel {
   padding: 18px;
 }
 
-.details-topline {
+.details-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  padding-bottom: 15px;
+  padding-bottom: 17px;
   border-bottom: 1px solid #ead6d8;
 }
 
 .details-eyebrow {
   display: block;
-  margin-bottom: 7px;
+  margin-bottom: 5px;
   color: #8b6268;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.7px;
 }
 
-.details-topline h2 {
+.details-header h2 {
   margin: 0;
-  color: #50070e;
+  color: #30080c;
   font-family: Georgia, 'Times New Roman', serif;
-  font-size: 20px;
+  font-size: 25px;
   font-weight: 600;
   line-height: 1.3;
 }
@@ -776,24 +1135,28 @@ onMounted(loadRequests)
 .details-subtitle {
   margin: 6px 0 0;
   color: #8b6268;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
 .close-button {
   flex-shrink: 0;
-  width: 30px;
-  height: 30px;
-  border: 1px solid #e6cdd0;
-  border-radius: 50%;
-  background: #fff;
-  color: #650b18;
-  font-size: 21px;
+  padding: 5px 0;
+  border: 0;
+  background: transparent;
+  color: #80696d;
+  font-family: inherit;
+  font-size: 13px;
   cursor: pointer;
 }
 
 .close-button:hover {
-  background: #f3e3e5;
+  color: #650b18;
+}
+
+.close-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .details-section {
@@ -801,34 +1164,20 @@ onMounted(loadRequests)
   border-bottom: 1px solid #ead6d8;
 }
 
-.details-section h3 {
-  margin: 0 0 13px;
-  color: #50070e;
-  font-family: Georgia, 'Times New Roman', serif;
-  font-size: 17px;
-  font-weight: 600;
-}
-
 .information-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 13px;
+  gap: 16px;
 }
 
 .information-item {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 5px;
+  gap: 3px;
 }
 
-.request-number {
-  margin-bottom: 15px;
-}
-
-.field-label,
-.form-field label {
-  display: block;
+.field-label {
   color: #887477;
   font-size: 12px;
   line-height: 1.5;
@@ -836,40 +1185,179 @@ onMounted(loadRequests)
 
 .field-value {
   overflow-wrap: anywhere;
-  color: #4c2026;
+  color: #30080c;
   font-size: 13px;
   font-weight: 700;
   line-height: 1.5;
+}
+
+.expected-field {
+  margin-top: 17px;
+}
+
+/* INSTRUCTIONS */
+.instructions-section {
+  padding: 17px 0 14px;
 }
 
 .form-field {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
-.form-field:last-child {
-  margin-bottom: 0;
+.form-field label {
+  display: block;
+  color: #30080c;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
 }
 
+/* RESIZABLE MESSAGE COMPOSER */
+.custom-instructions-field {
+  padding: 12px;
+  border: 1px solid #ead6d8;
+  border-radius: 10px;
+  background: #f9f0f0;
+}
+
+.form-field textarea {
+  min-height: 120px;
+  height: 120px;
+  resize: vertical;
+  padding: 13px 14px;
+  border: 1px solid #d9b9be;
+  border-radius: 8px;
+  background: #f9f0f0;
+  color: #30080c;
+  line-height: 1.6;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.form-field textarea::placeholder {
+  color: #b99fa3;
+}
+
+.textarea-hint {
+  color: #9a7b80;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+/* LAST RECORDED GREEN RECTANGLE */
 .instruction-history {
   display: flex;
-  align-items: flex-start;
-  gap: 7px;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 5px 0 10px;
+  padding: 9px 12px;
+  border: 1px solid #c6e2ce;
+  border-radius: 5px;
+  background: #dcefe2;
+  color: #367653;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.history-label {
+  font-weight: 500;
+}
+
+.instruction-history strong {
+  color: #286342;
+  font-weight: 700;
+}
+
+/* SAVE BUTTON */
+.save-notify-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  min-height: 36px;
+  margin-top: 0;
+  padding: 9px 16px;
+  border: 0;
+  border-radius: 7px;
+  background: #a8797e;
+  color: #fff;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s;
+}
+
+.save-notify-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: #650b18;
+}
+
+.save-notify-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* STATUS BUTTONS */
+.status-actions-section {
+  padding: 0 0 5px;
+}
+
+.status-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px 10px;
+}
+
+.status-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 7px 13px;
+  border: 1px solid #650b18;
+  border-radius: 8px;
+  background: transparent;
+  color: #30080c;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.status-action-button:hover:not(:disabled) {
+  background: #f3e3e5;
+}
+
+.status-action-button.current-status {
+  background: #650b18;
+  color: #fff;
+  cursor: default;
+}
+
+.status-action-button:disabled:not(.current-status) {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* FEEDBACK */
+.save-message {
   margin: 10px 0 0;
-  color: #887477;
+  color: #367653;
   font-size: 12px;
   line-height: 1.5;
 }
 
-.history-dot {
-  width: 7px;
-  height: 7px;
-  flex-shrink: 0;
-  margin-top: 5px;
-  border-radius: 50%;
-  background: #367653;
+.save-message.error {
+  color: #b42318;
 }
 
 .details-empty-state {
@@ -919,36 +1407,23 @@ onMounted(loadRequests)
   font-size: 13px;
 }
 
-.details-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-  padding-top: 17px;
-}
-
 .action-button {
   display: inline-flex;
-  min-height: 34px;
+  min-height: 36px;
   align-items: center;
   justify-content: center;
-  padding: 8px 13px;
+  padding: 8px 14px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 7px;
   font-family: inherit;
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
-  transition: background 0.15s;
 }
 
 .action-button.primary {
   background: #650b18;
   color: #fff;
-}
-
-.action-button.primary:hover {
-  background: #4c0711;
 }
 
 .action-button.secondary {
@@ -957,22 +1432,128 @@ onMounted(loadRequests)
   color: #650b18;
 }
 
-.action-button.secondary:hover {
-  background: #f3e3e5;
-}
-
 .action-button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
 
-.save-message {
-  margin: 12px 0 0;
-  color: #367653;
-  font-size: 12px;
-  line-height: 1.5;
+/* CONFIRMATION MODAL */
+.confirmation-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgb(35 15 18 / 42%);
 }
 
+.confirmation-modal {
+  width: min(500px, 100%);
+  padding: 26px 28px;
+  border: 1px solid #ead6d8;
+  border-radius: 12px;
+  background: #fffafa;
+  box-shadow: 0 12px 35px rgb(35 15 18 / 20%);
+}
+
+.confirmation-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.confirmation-icon {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid #ead0d3;
+  border-radius: 8px;
+  background: #f3dfe2;
+  color: #650b18;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.confirmation-modal h2 {
+  margin: 0;
+  color: #50070e;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.confirmation-modal > p {
+  margin: 0 0 20px;
+  color: #80696d;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.confirmation-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 18px;
+}
+
+.confirmation-actions .action-button {
+  min-height: 36px;
+  padding: 8px 15px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+.confirmation-actions .action-button.secondary {
+  border-color: #d9b9be;
+  background: #fffafa;
+  color: #650b18;
+}
+
+.confirmation-actions .action-button.primary {
+  background: #650b18;
+  color: #fff;
+}
+
+.confirmation-actions .action-button:hover:not(:disabled) {
+  filter: brightness(0.94);
+}
+
+.confirmation-actions .action-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* MODAL ANIMATION */
+.modal-enter-active,
+.modal-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.modal-enter-active .confirmation-modal,
+.modal-leave-active .confirmation-modal {
+  transition: transform 0.2s ease;
+}
+
+.modal-enter-from,
+.modal-leave-to {
+  opacity: 0;
+}
+
+.modal-enter-from .confirmation-modal,
+.modal-leave-to .confirmation-modal {
+  transform: translateY(8px) scale(0.98);
+}
+
+/* FEEDBACK TOAST */
 .feedback-message {
   position: fixed;
   right: 22px;
@@ -1001,6 +1582,7 @@ onMounted(loadRequests)
   cursor: pointer;
 }
 
+/* RESPONSIVE */
 @media (max-width: 1000px) {
   .requests-layout {
     grid-template-columns: minmax(0, 1fr);
@@ -1049,14 +1631,32 @@ onMounted(loadRequests)
   }
 
   .information-grid {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
   }
 
-  .details-actions {
+  .details-header h2 {
+    font-size: 21px;
+  }
+
+  .status-action-buttons {
+    gap: 8px;
+  }
+
+  .status-action-button {
+    padding: 7px 10px;
+    font-size: 11px;
+  }
+
+  .confirmation-modal {
+    padding: 24px 19px;
+  }
+
+  .confirmation-actions {
     flex-direction: column-reverse;
   }
 
-  .details-actions button {
+  .confirmation-actions button {
     width: 100%;
   }
 }

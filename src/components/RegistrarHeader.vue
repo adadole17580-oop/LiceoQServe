@@ -25,6 +25,7 @@
         @click="$router.push('/registrar/profile')"
       >
         <span class="avatar">MS</span>
+
         <span class="profile-info">
           <strong>Michelle Sy</strong>
           <small>Registrar Staff</small>
@@ -36,15 +37,22 @@
 
 <style scoped>
 .registrar-header {
-  min-height: 94px;
-  padding: 18px 28px;
+  position: relative;
   display: flex;
+  flex: 0 0 94px;
   align-items: center;
   justify-content: space-between;
+  width: 100%;
+  min-height: 94px;
+  margin: 0;
+  padding: 18px 32px;
   gap: 20px;
+  box-sizing: border-box;
+
   background: #650b18;
   border-bottom: 3px solid #4c0711;
   color: #ffffff;
+  z-index: 20;
 }
 
 .heading h1 {
@@ -82,8 +90,10 @@
 }
 
 .icon-button {
+  display: grid;
   width: 38px;
   height: 38px;
+  place-items: center;
   border: 1px solid #98515b;
   border-radius: 8px;
   background: #7a1b28;
@@ -108,9 +118,9 @@
 }
 
 .avatar {
+  display: grid;
   width: 38px;
   height: 38px;
-  display: grid;
   place-items: center;
   border-radius: 50%;
   background: #f2e2e3;

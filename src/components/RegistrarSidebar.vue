@@ -1,7 +1,9 @@
+
 <template>
   <aside class="sidebar">
     <div class="brand">
       <div class="brand-logo">LQ</div>
+
       <div class="brand-text">
         <strong>LiceoQServe</strong>
         <span>Registrar Portal</span>
@@ -26,12 +28,15 @@
         <small>Open · 8:00 AM–5:00 PM</small>
       </div>
 
-      <button class="logout-button" @click="openLogoutModal">
+      <button
+        class="logout-button"
+        @click="openLogoutModal"
+      >
         LOG OUT
       </button>
     </div>
 
-    <!-- CUSTOM LOGOUT MODAL -->
+    <!-- LOGOUT MODAL -->
     <Teleport to="body">
       <div
         v-if="showLogoutModal"
@@ -47,8 +52,13 @@
         >
           <div class="modal-icon">!</div>
 
-          <h2 id="logout-title">Log out of QueueLess?</h2>
-          <p>You will return to the role selection screen.</p>
+          <h2 id="logout-title">
+            Log out of LiceoQServe?
+          </h2>
+
+          <p>
+            You will return to the role selection screen.
+          </p>
 
           <div class="modal-actions">
             <button
@@ -82,15 +92,40 @@ const router = useRouter()
 const showLogoutModal = ref(false)
 const isLoggingOut = ref(false)
 
+// Dashboard label stays the same on every page.
 const menuItems = [
-  { label: 'HOME', path: '/registrar/dashboard' },
-  { label: 'QUEUE', path: '/registrar/queue' },
-  { label: 'APPOINTMENTS', path: '/registrar/appointments' },
-  { label: 'REQUESTS', path: '/registrar/requests' },
-  { label: 'NOTIFICATION', path: '/registrar/notifications' },
-  { label: 'STUDENTS', path: '/registrar/students' },
-  { label: 'HISTORY', path: '/registrar/history' },
-  { label: 'PROFILE', path: '/registrar/profile' },
+  {
+    label: 'DASHBOARD',
+    path: '/registrar/dashboard',
+  },
+  {
+    label: 'QUEUE',
+    path: '/registrar/queue',
+  },
+  {
+    label: 'APPOINTMENTS',
+    path: '/registrar/appointments',
+  },
+  {
+    label: 'REQUESTS',
+    path: '/registrar/requests',
+  },
+  {
+    label: 'NOTIFICATION',
+    path: '/registrar/notifications',
+  },
+  {
+    label: 'STUDENTS',
+    path: '/registrar/students',
+  },
+  {
+    label: 'HISTORY',
+    path: '/registrar/history',
+  },
+  {
+    label: 'PROFILE',
+    path: '/registrar/profile',
+  },
 ]
 
 function openLogoutModal() {
@@ -129,15 +164,17 @@ async function confirmLogout() {
 
 <style scoped>
 .sidebar {
-  position: sticky;
-  top: 0;
+  position: relative;
   display: flex;
   flex: 0 0 210px;
   flex-direction: column;
+  align-self: stretch;
   width: 210px;
-  height: 100vh;
-  min-height: 500px;
+  min-height: calc(100vh - 94px);
+  margin: 0;
   padding: 0 8px 12px;
+  box-sizing: border-box;
+
   background: #f7eeee;
   border-right: 1px solid #650b18;
 }
@@ -163,6 +200,7 @@ async function confirmLogout() {
   text-decoration: none;
   font-size: 11px;
   font-weight: 700;
+  transition: background 0.2s ease, color 0.2s ease;
 }
 
 .nav-link:hover {
@@ -207,6 +245,7 @@ async function confirmLogout() {
   background: transparent;
   font-size: 11px;
   font-weight: 700;
+  cursor: pointer;
 }
 
 .logout-button:hover {
@@ -218,7 +257,7 @@ async function confirmLogout() {
   cursor: not-allowed;
 }
 
-/* Modal overlay */
+/* LOGOUT MODAL */
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -282,6 +321,7 @@ async function confirmLogout() {
   border-radius: 9px;
   font-size: 11px;
   font-weight: 700;
+  cursor: pointer;
 }
 
 .cancel-button {
@@ -309,7 +349,6 @@ async function confirmLogout() {
   .sidebar {
     flex-basis: 66px;
     width: 66px;
-    min-height: 100vh;
     padding: 0 5px 10px;
   }
 

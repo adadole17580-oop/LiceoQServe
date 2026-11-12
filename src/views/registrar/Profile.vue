@@ -95,10 +95,19 @@
         </p>
 
         <div class="form-actions">
-          <button class="update-button" type="submit" :disabled="isUpdatingPassword">
+          <button
+            class="update-button"
+            type="submit"
+            :disabled="isUpdatingPassword"
+          >
             {{ isUpdatingPassword ? 'Updating...' : 'Update password' }}
           </button>
-          <button class="cancel-button" type="button" @click="cancelPasswordChange">
+
+          <button
+            class="cancel-button"
+            type="button"
+            @click="cancelPasswordChange"
+          >
             Cancel
           </button>
         </div>
@@ -121,7 +130,7 @@
             <span>!</span>
           </div>
 
-          <h3 id="logout-title">Log out of QueueLess?</h3>
+          <h3 id="logout-title">Log out of LiceoQServe?</h3>
           <p>You will return to the role selection screen.</p>
 
           <div class="modal-actions">
@@ -157,7 +166,7 @@ const router = useRouter()
 
 const staff = ref({
   name: '',
-  position: 'Registrar',
+  position: 'Staff',
   employeeId: 'Not available',
   email: '',
   office: 'Loading...',
@@ -190,7 +199,8 @@ const showLogoutModal = ref(false)
 const isLoggingOut = ref(false)
 
 async function loadStaffProfile() {
-  const { data: authData, error: authError } = await supabase.auth.getUser()
+  const { data: authData, error: authError } =
+    await supabase.auth.getUser()
 
   if (authError || !authData.user) {
     staff.value.status = 'Not signed in'
@@ -203,7 +213,7 @@ async function loadStaffProfile() {
     .from('profiles')
     .select(`
       id,
-      student_id,
+      employee_id,
       full_name,
       university_email,
       role,
@@ -218,17 +228,19 @@ async function loadStaffProfile() {
 
   if (error) {
     console.error('Error loading staff profile:', error.message)
+
     staff.value.name = user.user_metadata?.full_name || 'Staff'
     staff.value.email = user.email || ''
     staff.value.status = 'Unable to load'
     staff.value.office = 'Not available'
+
     return
   }
 
   staff.value = {
     name: data.full_name || 'Staff',
-    position: data.role === 'staff' ? 'Registrar' : data.role || 'Staff',
-    employeeId: data.student_id || 'Not available',
+    position: data.offices?.name || 'Staff',
+    employeeId: data.employee_id || 'Not available',
     email: data.university_email || user.email || 'Not available',
     office: data.offices?.name || 'Not assigned',
     role: data.role || 'Staff',
@@ -258,33 +270,38 @@ async function updatePassword() {
   }
 
   if (passwords.current === passwords.new) {
-    passwordMessage.value = 'Your new password must be different from your current password.'
+    passwordMessage.value =
+      'Your new password must be different from your current password.'
     return
   }
 
   isUpdatingPassword.value = true
 
   try {
-    const { data: authData, error: authError } = await supabase.auth.getUser()
+    const { data: authData, error: authError } =
+      await supabase.auth.getUser()
 
     if (authError || !authData.user?.email) {
-      passwordMessage.value = 'Unable to verify your account. Please sign in again.'
+      passwordMessage.value =
+        'Unable to verify your account. Please sign in again.'
       return
     }
 
-    const { error: verifyError } = await supabase.auth.signInWithPassword({
-      email: authData.user.email,
-      password: passwords.current,
-    })
+    const { error: verifyError } =
+      await supabase.auth.signInWithPassword({
+        email: authData.user.email,
+        password: passwords.current,
+      })
 
     if (verifyError) {
       passwordMessage.value = 'Your current password is incorrect.'
       return
     }
 
-    const { error: updateError } = await supabase.auth.updateUser({
-      password: passwords.new,
-    })
+    const { error: updateError } =
+      await supabase.auth.updateUser({
+        password: passwords.new,
+      })
 
     if (updateError) {
       passwordMessage.value = updateError.message
@@ -294,7 +311,8 @@ async function updatePassword() {
     cancelPasswordChange()
     passwordMessage.value = 'Password updated successfully.'
   } catch (error) {
-    passwordMessage.value = error.message || 'Unable to update password.'
+    passwordMessage.value =
+      error.message || 'Unable to update password.'
   } finally {
     isUpdatingPassword.value = false
   }

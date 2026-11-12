@@ -121,7 +121,7 @@ import { supabase } from '../../lib/supabase'
 
 const router = useRouter()
 
-// Registrar office ID
+// Registrar office ID 
 const REGISTRAR_OFFICE_ID =
   '00409abc-cb88-480e-bdc0-5b94ac322ae7'
 

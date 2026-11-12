@@ -1,22 +1,26 @@
 
 <template>
-  <!-- Show login without the Registrar layout -->
+  <!-- Public pages such as login -->
   <router-view v-if="$route.meta.public" />
 
-  <!-- Show the existing Registrar layout after login -->
+  <!-- Registrar layout -->
   <div v-else class="registrar-app">
-    <RegistrarSidebar />
+    <!-- Full-width header -->
+    <RegistrarHeader />
 
-    <div class="main-section">
-      <RegistrarHeader />
+    <!-- Sidebar and page content underneath header -->
+    <div class="registrar-body">
+      <RegistrarSidebar />
 
-      <main class="page-content">
-        <router-view />
-      </main>
+      <div class="main-section">
+        <main class="page-content">
+          <router-view />
+        </main>
 
-      <footer class="app-footer">
-        LiceoQServe · Registrar Services
-      </footer>
+        <footer class="app-footer">
+          LiceoQServe · Registrar Services
+        </footer>
+      </div>
     </div>
   </div>
 </template>
@@ -54,9 +58,11 @@ import RegistrarHeader from './components/RegistrarHeader.vue'
 html,
 body,
 #app {
-  margin: 0;
+  width: 100%;
   min-width: 320px;
   min-height: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 body {
@@ -75,19 +81,37 @@ button {
   cursor: pointer;
 }
 
+/* MAIN REGISTRAR LAYOUT */
 .registrar-app {
   display: flex;
+  flex-direction: column;
+  width: 100%;
   min-height: 100vh;
+  margin: 0;
+  padding: 0;
   background: var(--pink-bg);
 }
 
+/* SIDEBAR + PAGE CONTENT ROW */
+.registrar-body {
+  display: flex;
+  flex: 1;
+  align-items: stretch;
+  width: 100%;
+  min-height: calc(100vh - 94px);
+}
+
+/* MAIN CONTENT AREA */
 .main-section {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-width: 0;
+  min-height: calc(100vh - 94px);
+  background: var(--pink-bg);
 }
 
+/* PAGE CONTENT */
 .page-content {
   flex: 1;
   width: 100%;
@@ -96,6 +120,7 @@ button {
   padding: 26px 30px;
 }
 
+/* FOOTER */
 .app-footer {
   padding: 14px 30px;
   color: var(--text-muted);
@@ -104,6 +129,7 @@ button {
   background: #fff8f8;
 }
 
+/* PAGE HEADINGS */
 .page-heading {
   margin-bottom: 22px;
 }
@@ -122,6 +148,7 @@ button {
   line-height: 1.6;
 }
 
+/* PANELS */
 .panel {
   min-width: 0;
   padding: 20px;
@@ -138,6 +165,7 @@ button {
   font-weight: 700;
 }
 
+/* BUTTONS */
 .primary-button {
   padding: 10px 15px;
   color: #fff;
@@ -162,6 +190,7 @@ button {
   font-weight: 600;
 }
 
+/* TABLES */
 .data-table-wrap {
   width: 100%;
   overflow-x: auto;
@@ -201,6 +230,7 @@ button {
   background: #fff9f9;
 }
 
+/* STATUS LABELS */
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -246,6 +276,7 @@ button {
   font-size: 13px;
 }
 
+/* RESPONSIVE */
 @media (max-width: 900px) {
   .page-content {
     padding: 20px 16px;
@@ -253,6 +284,16 @@ button {
 
   .app-footer {
     padding: 12px 16px;
+  }
+}
+
+@media (max-width: 650px) {
+  .registrar-body {
+    min-height: calc(100vh - 94px);
+  }
+
+  .page-content {
+    padding: 16px 12px;
   }
 }
 </style>

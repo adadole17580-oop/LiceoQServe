@@ -332,7 +332,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { supabase } from '../../lib/supabase'
 
 const filters = ['All', 'Unread', 'Read']
@@ -343,7 +343,9 @@ const showTransactionModal = ref(false)
 const activeTransaction = ref(null)
 
 const notifications = ref([])
+
 let currentUserId = null
+let notificationChannel = null
 
 const unreadCount = computed(() =>
   notifications.value.filter((item) => !item.read).length
@@ -394,9 +396,10 @@ function mapNotification(item) {
     message: item.message,
     student: 'Not available',
     time: formatDate(item.created_at),
+    createdAt: item.created_at,
     category: item.category,
     type: getNotificationType(item.category),
-    read: item.is_read,
+    read: Boolean(item.is_read),
     relatedId: item.related_id,
     transactionType: item.category,
     reference: item.related_id || 'No linked transaction',
@@ -405,20 +408,43 @@ function mapNotification(item) {
   }
 }
 
+function sortNotifications() {
+  notifications.value.sort((a, b) => {
+    return new Date(b.createdAt).getTime() -
+      new Date(a.createdAt).getTime()
+  })
+}
+
+function insertOrUpdateNotification(item) {
+  if (!item || item.recipient_id !== currentUserId) return
+
+  const mapped = mapNotification(item)
+
+  const existingIndex = notifications.value.findIndex(
+    (notification) => notification.id === mapped.id
+  )
+
+  if (existingIndex !== -1) {
+    notifications.value.splice(existingIndex, 1, mapped)
+  } else {
+    notifications.value.unshift(mapped)
+  }
+
+  sortNotifications()
+
+  if (selectedNotification.value?.id === mapped.id) {
+    selectedNotification.value = mapped
+  }
+
+  if (activeTransaction.value?.id === mapped.id) {
+    activeTransaction.value = mapped
+  }
+}
+
 async function loadNotifications() {
+  if (!currentUserId) return
+
   try {
-    const { data: { user }, error: authError } =
-      await supabase.auth.getUser()
-
-    if (authError) throw authError
-
-    if (!user) {
-      console.error('No authenticated user found.')
-      return
-    }
-
-    currentUserId = user.id
-
     const { data, error } = await supabase
       .from('notifications')
       .select(`
@@ -440,6 +466,68 @@ async function loadNotifications() {
   } catch (error) {
     console.error('Error loading notifications:', error)
   }
+}
+
+function subscribeToNotifications() {
+  if (!currentUserId) return
+
+  if (notificationChannel) {
+    supabase.removeChannel(notificationChannel)
+    notificationChannel = null
+  }
+
+  notificationChannel = supabase
+    .channel(`registrar-notifications-${currentUserId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'notifications',
+        filter: `recipient_id=eq.${currentUserId}`,
+      },
+      (payload) => {
+        console.log(
+          'Registrar notification event:',
+          payload.eventType
+        )
+
+        if (
+          payload.eventType === 'INSERT' ||
+          payload.eventType === 'UPDATE'
+        ) {
+          insertOrUpdateNotification(payload.new)
+        }
+
+        if (payload.eventType === 'DELETE') {
+          notifications.value = notifications.value.filter(
+            (notification) => notification.id !== payload.old.id
+          )
+
+          if (selectedNotification.value?.id === payload.old.id) {
+            selectedNotification.value = null
+          }
+        }
+      }
+    )
+    .subscribe((status, error) => {
+      console.log('Notifications Realtime status:', status)
+
+      if (status === 'SUBSCRIBED') {
+        console.log('Successfully connected to notification updates.')
+
+        // Fetch again after subscribing to avoid missing new records
+        // between the initial fetch and Realtime connection.
+        loadNotifications()
+      }
+
+      if (
+        status === 'CHANNEL_ERROR' ||
+        status === 'TIMED_OUT'
+      ) {
+        console.error('Notifications Realtime error:', error)
+      }
+    })
 }
 
 function setFilter(filter) {
@@ -467,13 +555,21 @@ async function markAsRead(notification) {
     if (error) throw error
 
     notification.read = true
+
+    const matchingNotification = notifications.value.find(
+      (item) => item.id === notification.id
+    )
+
+    if (matchingNotification) {
+      matchingNotification.read = true
+    }
   } catch (error) {
     console.error('Error marking notification as read:', error)
   }
 }
 
 async function markAllAsRead() {
-  if (!currentUserId) return
+  if (!currentUserId || unreadCount.value === 0) return
 
   try {
     const { error } = await supabase
@@ -487,6 +583,10 @@ async function markAllAsRead() {
     notifications.value.forEach((notification) => {
       notification.read = true
     })
+
+    if (selectedNotification.value) {
+      selectedNotification.value.read = true
+    }
   } catch (error) {
     console.error('Error marking all notifications as read:', error)
   }
@@ -498,8 +598,40 @@ function openRelatedTransaction(notification) {
   showTransactionModal.value = true
 }
 
+async function initializeNotifications() {
+  try {
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser()
+
+    if (error) throw error
+
+    if (!user) {
+      console.error('No authenticated user found.')
+      return
+    }
+
+    currentUserId = user.id
+
+    // Subscribe first, then fetch the existing notifications.
+    subscribeToNotifications()
+
+    await loadNotifications()
+  } catch (error) {
+    console.error('Error initializing notifications:', error)
+  }
+}
+
 onMounted(() => {
-  loadNotifications()
+  initializeNotifications()
+})
+
+onUnmounted(() => {
+  if (notificationChannel) {
+    supabase.removeChannel(notificationChannel)
+    notificationChannel = null
+  }
 })
 </script>
 
