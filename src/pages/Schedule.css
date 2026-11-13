@@ -1,0 +1,619 @@
+
+/* =====================================
+   SCHEDULE PAGE
+===================================== */
+
+.schedule-page {
+    width: 100%;
+    min-height: 100%;
+    padding: 24px 20px;
+    box-sizing: border-box;
+    background: #efdfdf;
+    color: #350609;
+    font-family: Georgia, "Times New Roman", serif;
+}
+
+/* =====================================
+   PAGE HEADING
+===================================== */
+
+.page-heading {
+    margin-bottom: 18px;
+}
+
+.page-heading h1 {
+    margin: 0 0 5px;
+    color: #59070d;
+    font-size: 23px;
+    font-weight: 700;
+}
+
+.page-heading p {
+    margin: 0;
+    color: #806d6d;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+/* =====================================
+   MAIN LAYOUT
+===================================== */
+
+.schedule-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+    align-items: start;
+    gap: 18px;
+    width: 100%;
+}
+
+/* =====================================
+   SCHEDULE CARDS
+===================================== */
+
+.schedule-card {
+    min-width: 0;
+    padding: 18px 16px;
+    border: 1px solid #cbbabb;
+    border-radius: 12px;
+    background: #f8eeee;
+    box-sizing: border-box;
+}
+
+.schedule-card h2 {
+    margin: 0;
+    color: #4a171a;
+    font-size: 19px;
+    font-weight: 500;
+}
+
+/* =====================================
+   CARD HEADERS
+===================================== */
+
+.schedule-card-header,
+.blocked-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 13px;
+}
+
+.refresh-button {
+    min-height: 27px;
+    padding: 5px 11px;
+    border: 1px solid #a77f80;
+    border-radius: 6px;
+    background: transparent;
+    color: #59070d;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 10px;
+    cursor: pointer;
+    transition: 0.2s ease;
+}
+
+.refresh-button:hover {
+    background: #59070d;
+    color: #fff;
+}
+
+.refresh-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* =====================================
+   OFFICE HOURS
+===================================== */
+
+.office-hours-card {
+    min-height: 266px;
+}
+
+.office-hour-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 28px;
+    margin-bottom: 1px;
+    color: #443133;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.office-hour-row strong {
+    color: #350609;
+    font-size: 10px;
+    font-weight: 700;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.office-hour-row strong.closed {
+    color: #59070d;
+}
+
+/* =====================================
+   BLOCK DATE OR TIME
+===================================== */
+
+.block-date-card {
+    min-height: 230px;
+}
+
+.block-date-card h2 {
+    margin-bottom: 14px;
+}
+
+.block-date-card form {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 9px;
+}
+
+.schedule-form-field {
+    width: 100%;
+}
+
+.schedule-form-field input,
+.schedule-form-field select {
+    display: block;
+    width: 100%;
+    height: 36px;
+    padding: 7px 10px;
+    border: 1px solid #d3bfc0;
+    border-radius: 7px;
+    outline: none;
+    background: #f8eeee;
+    color: #350609;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 11px;
+    box-sizing: border-box;
+}
+
+.schedule-form-field input::placeholder {
+    color: #927e7e;
+}
+
+.schedule-form-field input:focus,
+.schedule-form-field select:focus {
+    border-color: #59070d;
+    box-shadow: 0 0 0 2px rgba(89, 7, 13, 0.08);
+}
+
+.schedule-form-field select {
+    cursor: pointer;
+}
+
+.schedule-form-field input:disabled,
+.schedule-form-field select:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* =====================================
+   BLOCK BUTTON
+===================================== */
+
+.block-button {
+    align-self: flex-start;
+    min-height: 30px;
+    margin-top: 1px;
+    padding: 7px 13px;
+    border: 1px solid #59070d;
+    border-radius: 6px;
+    background: #59070d;
+    color: #fff;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: 0.2s ease;
+}
+
+.block-button:hover {
+    border-color: #760d16;
+    background: #760d16;
+}
+
+.block-button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+/* =====================================
+   BLOCKED DATES AND TIMES
+===================================== */
+
+.blocked-section {
+    margin-top: 17px;
+    min-height: 120px;
+}
+
+.blocked-header {
+    margin-bottom: 15px;
+}
+
+.blocked-header h2 {
+    font-size: 19px;
+}
+
+.blocked-header-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.blocked-count {
+    padding: 6px 11px;
+    border-radius: 15px;
+    background: #eee1e1;
+    color: #806d6d;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 9px;
+    white-space: nowrap;
+}
+
+/* =====================================
+   BLOCKED DATE ITEM
+===================================== */
+
+.blocked-date-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 15px;
+    min-height: 45px;
+    padding: 9px 3px;
+    border-bottom: 1px solid #e6d8d8;
+}
+
+.blocked-date-item:last-child {
+    border-bottom: none;
+}
+
+.blocked-date-info {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+}
+
+.blocked-date-info strong {
+    color: #443133;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.blocked-date-info span {
+    color: #806d6d;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 10px;
+}
+
+.blocked-date-info small {
+    color: #987e7e;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 9px;
+    overflow-wrap: anywhere;
+}
+
+/* =====================================
+   REMOVE BUTTON
+===================================== */
+
+.remove-button {
+    flex-shrink: 0;
+    min-height: 29px;
+    padding: 6px 12px;
+    border: 1px solid #a77f80;
+    border-radius: 6px;
+    background: transparent;
+    color: #59070d;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 10px;
+    cursor: pointer;
+    transition: 0.2s ease;
+}
+
+.remove-button:hover {
+    border-color: #59070d;
+    background: #59070d;
+    color: #fff;
+}
+
+.remove-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* =====================================
+   EMPTY AND ERROR MESSAGES
+===================================== */
+
+.empty-state {
+    margin: 15px 0;
+    color: #987e7e;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 11px;
+}
+
+.error-message {
+    margin: 0 0 15px;
+    padding: 10px 12px;
+    border: 1px solid #d9a5a5;
+    border-radius: 6px;
+    background: #f8dddd;
+    color: #8a1010;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 12px;
+}
+
+/* =====================================
+   REMOVE CONFIRMATION MODAL
+===================================== */
+
+.schedule-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9998;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(35, 20, 20, 0.5);
+}
+
+.schedule-confirm-modal {
+    width: 100%;
+    max-width: 380px;
+    padding: 25px;
+    border: 1px solid #e3cecf;
+    border-radius: 14px;
+    background: #f8eeee;
+    text-align: center;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    box-sizing: border-box;
+    animation: scheduleModalIn 0.2s ease;
+}
+
+.confirm-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    margin: 0 auto 13px;
+    border-radius: 50%;
+    background: #f5e2d5;
+    color: #a54a22;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 25px;
+    font-weight: 700;
+}
+
+.schedule-confirm-modal h2 {
+    margin: 0 0 10px;
+    color: #59070d;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 21px;
+}
+
+.schedule-confirm-modal p {
+    margin: 0 0 22px;
+    color: #806d6d;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 12px;
+    line-height: 1.7;
+}
+
+.schedule-confirm-modal p strong {
+    color: #59070d;
+}
+
+.confirm-actions {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+}
+
+.confirm-cancel-button,
+.confirm-remove-button {
+    min-width: 95px;
+    min-height: 35px;
+    padding: 8px 17px;
+    border-radius: 6px;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: 0.2s ease;
+}
+
+.confirm-cancel-button {
+    border: 1px solid #a77f80;
+    background: transparent;
+    color: #59070d;
+}
+
+.confirm-cancel-button:hover {
+    background: #eee1e1;
+}
+
+.confirm-remove-button {
+    border: 1px solid #59070d;
+    background: #59070d;
+    color: #fff;
+}
+
+.confirm-remove-button:hover {
+    background: #760d16;
+}
+
+.confirm-cancel-button:disabled,
+.confirm-remove-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+@keyframes scheduleModalIn {
+    from {
+        opacity: 0;
+        transform: translateY(8px) scale(0.97);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* =====================================
+   SUCCESS MODAL
+   Used for BLOCKING only
+===================================== */
+
+.schedule-success-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(35, 20, 20, 0.5);
+}
+
+.schedule-success-modal {
+    width: 100%;
+    max-width: 360px;
+    padding: 25px;
+    border: 1px solid #e3cecf;
+    border-radius: 14px;
+    background: #f8eeee;
+    text-align: center;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+}
+
+.success-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    margin: 0 auto 13px;
+    border-radius: 50%;
+    background: #dceadd;
+    color: #32663c;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 25px;
+    font-weight: 700;
+}
+
+.schedule-success-modal h2 {
+    margin: 0 0 10px;
+    color: #59070d;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 21px;
+}
+
+.schedule-success-modal p {
+    margin: 0 0 20px;
+    color: #806d6d;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.schedule-success-modal button {
+    min-width: 85px;
+    padding: 9px 20px;
+    border: none;
+    border-radius: 6px;
+    background: #59070d;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.schedule-success-modal button:hover {
+    background: #760d16;
+}
+
+/* =====================================
+   RESPONSIVE DESIGN
+===================================== */
+
+@media (max-width: 900px) {
+    .schedule-page {
+        padding: 20px 15px;
+    }
+
+    .schedule-layout {
+        gap: 12px;
+    }
+
+    .schedule-card {
+        padding: 15px 12px;
+    }
+
+    .schedule-card h2 {
+        font-size: 17px;
+    }
+}
+
+@media (max-width: 650px) {
+    .schedule-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .office-hours-card {
+        min-height: auto;
+    }
+
+    .blocked-section {
+        margin-top: 14px;
+    }
+}
+
+@media (max-width: 420px) {
+    .schedule-page {
+        padding: 18px 10px;
+    }
+
+    .page-heading h1 {
+        font-size: 19px;
+    }
+
+    .page-heading p {
+        font-size: 11px;
+    }
+
+    .blocked-header {
+        align-items: flex-start;
+    }
+
+    .blocked-header h2 {
+        font-size: 16px;
+    }
+
+    .blocked-header-actions {
+        gap: 5px;
+    }
+
+    .blocked-count {
+        padding: 5px 7px;
+    }
+
+    .blocked-date-item {
+        gap: 8px;
+    }
+}

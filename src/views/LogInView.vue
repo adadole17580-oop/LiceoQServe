@@ -1,25 +1,26 @@
 
 <script setup>
 import { ref } from 'vue'
-import { supabase } from '../lib/supabase'
-
-const emit = defineEmits(['login'])
+import { supabase } from '../lib/supabase.js'
 
 const email = ref('')
 const password = ref('')
 const showPassword = ref(false)
-const errorMessage = ref('')
+const keepMeSignedIn = ref(false)
 const isLoading = ref(false)
+const errorMessage = ref('')
+const successMessage = ref('')
 
-async function login() {
+const emit = defineEmits(['login'])
+
+async function signIn() {
   errorMessage.value = ''
+  successMessage.value = ''
 
   if (!email.value.trim() || !password.value) {
-    errorMessage.value = 'Please enter your email and password.'
+    errorMessage.value = 'Please enter your university email and password.'
     return
   }
-
-  if (isLoading.value) return
 
   isLoading.value = true
 
@@ -29,23 +30,58 @@ async function login() {
       password: password.value
     })
 
-    if (error) {
-      throw error
+    if (error) throw error
+
+    if (!data.user) {
+      throw new Error('Unable to sign in. Please try again.')
+    }
+
+    // Save the selected session preference.
+    if (keepMeSignedIn.value) {
+      localStorage.setItem('liceoqserveKeepSignedIn', 'true')
+      sessionStorage.removeItem('liceoqserveSessionAllowed')
+    } else {
+      localStorage.removeItem('liceoqserveKeepSignedIn')
+      sessionStorage.setItem('liceoqserveSessionAllowed', 'true')
     }
 
     emit('login', data.user)
-  } catch (error) {
-    console.error('Supabase login error:', error)
 
-    if (error.message?.toLowerCase().includes('email not confirmed')) {
-      errorMessage.value = 'Please confirm your email before signing in.'
-    } else if (
-      error.message?.toLowerCase().includes('invalid login credentials')
-    ) {
-      errorMessage.value = 'Incorrect email or password.'
-    } else {
-      errorMessage.value = error.message || 'Unable to sign in. Please try again.'
-    }
+  } catch (error) {
+    console.error('Sign in error:', error)
+    errorMessage.value =
+      error.message || 'Unable to sign in. Please try again.'
+  } finally {
+    isLoading.value = false
+  }
+}
+
+async function forgotPassword() {
+  errorMessage.value = ''
+  successMessage.value = ''
+
+  if (!email.value.trim()) {
+    errorMessage.value =
+      'Please enter your university email first.'
+    return
+  }
+
+  isLoading.value = true
+
+  try {
+    const { error } = await supabase.auth.resetPasswordForEmail(
+      email.value.trim()
+    )
+
+    if (error) throw error
+
+    successMessage.value =
+      'Password reset instructions have been sent to your email. Please check your inbox.'
+
+  } catch (error) {
+    console.error('Password reset error:', error)
+    errorMessage.value =
+      error.message || 'Unable to send the password reset email.'
   } finally {
     isLoading.value = false
   }
@@ -54,90 +90,142 @@ async function login() {
 
 <template>
   <main class="login-page">
-    <section class="welcome-panel">
-      <div class="brand">
-        <span class="brand-logo">LQ</span>
-        <div>
-          <h2>LiceoQServe</h2>
-          <p>OSA Portal</p>
+
+    <!-- LEFT PANEL -->
+    <section class="login-brand-panel">
+      <div class="brand-content">
+
+        <div class="brand-logo">
+          LiceoQServe
         </div>
-      </div>
 
-      <div class="welcome-copy">
-        <p class="eyebrow">STAFF PORTAL</p>
-        <h1>Campus services without the unnecessary wait.</h1>
-        <p class="description">
-          Manage queues, appointments, requests, and campus service updates in one place.
+        <p class="brand-label">STAFF PORTAL</p>
+
+        <h1>
+          Campus services without
+          <br />
+          the unnecessary wait.
+        </h1>
+
+        <p class="brand-description">
+          Manage queues, appointments, requests, and campus service
+          updates in one place.
         </p>
+
       </div>
 
-      <p class="tagline">QUEUE. SCHEDULE. SERVE.</p>
+      <div class="brand-footer">
+        QUEUE. SCHEDULE. SERVE
+      </div>
+
+      <div class="decorative-circle circle-top"></div>
+      <div class="decorative-circle circle-bottom"></div>
     </section>
 
-    <section class="form-panel">
-      <div class="form-content">
-        <p class="eyebrow dark">WELCOME BACK</p>
+    <!-- RIGHT PANEL -->
+    <section class="login-form-panel">
+      <div class="login-content">
 
-        <h1>Sign in to your account</h1>
+        <div class="login-heading">
+          <p class="welcome-label">WELCOME BACK</p>
 
-        <p class="subtitle">
-          Enter your service/office account details to continue.
-        </p>
+          <h2>Sign in to your account</h2>
 
-        <form class="login-form" @submit.prevent="login">
-          <label for="email">University Email</label>
+          <p class="login-subtitle">
+            Enter your service/office account details to continue.
+          </p>
+        </div>
 
-          <input
-            id="email"
-            v-model="email"
-            type="email"
-            placeholder="servicestaff@liceo.edu.ph"
-            autocomplete="username"
-            required
-            :disabled="isLoading"
-          />
+        <form class="login-card" @submit.prevent="signIn">
 
-          <label for="password">Password</label>
+          <!-- EMAIL -->
+          <div class="form-group">
+            <label for="email">University Email</label>
 
-          <div class="password-field">
             <input
-              id="password"
-              v-model="password"
-              :type="showPassword ? 'text' : 'password'"
-              placeholder="Enter your password"
-              autocomplete="current-password"
+              id="email"
+              v-model="email"
+              type="email"
+              placeholder="Enter your university email"
+              autocomplete="username"
               required
-              :disabled="isLoading"
             />
+          </div>
+
+          <!-- PASSWORD -->
+          <div class="form-group">
+            <label for="password">Password</label>
+
+            <div class="password-wrapper">
+              <input
+                id="password"
+                v-model="password"
+                :type="showPassword ? 'text' : 'password'"
+                placeholder="Enter your password"
+                autocomplete="current-password"
+                required
+              />
+
+              <button
+                type="button"
+                class="password-toggle"
+                @click="showPassword = !showPassword"
+              >
+                {{ showPassword ? 'Hide' : 'Show' }}
+              </button>
+            </div>
+          </div>
+
+          <!-- LOGIN OPTIONS -->
+          <div class="login-options">
+
+            <label class="remember-option">
+              <input
+                v-model="keepMeSignedIn"
+                type="checkbox"
+              />
+              <span>Keep me signed in</span>
+            </label>
 
             <button
               type="button"
-              class="show-button"
-              @click="showPassword = !showPassword"
+              class="forgot-password"
+              @click="forgotPassword"
               :disabled="isLoading"
             >
-              {{ showPassword ? 'Hide' : 'Show' }}
+              Forgot Password?
             </button>
+
           </div>
 
+          <!-- MESSAGES -->
           <p v-if="errorMessage" class="error-message">
             {{ errorMessage }}
           </p>
 
+          <p v-if="successMessage" class="success-message">
+            {{ successMessage }}
+          </p>
+
+          <!-- SIGN IN BUTTON -->
           <button
-            class="submit-button"
             type="submit"
+            class="sign-in-button"
             :disabled="isLoading"
           >
             {{ isLoading ? 'Signing In...' : 'Sign In' }}
           </button>
+
         </form>
 
         <p class="privacy-note">
-          By continuing, you acknowledge the university's acceptable use and data privacy policies.
+          By continuing, you acknowledge the university's acceptable
+          use and data privacy policies.
         </p>
+
       </div>
     </section>
+
   </main>
 </template>
 
@@ -148,282 +236,354 @@ async function login() {
 
 .login-page {
   display: grid;
-  grid-template-columns: 1fr 1.1fr;
-  width: 100%;
+  grid-template-columns: 46.8% 53.2%;
   min-height: 100vh;
+  width: 100%;
+  font-family: Arial, sans-serif;
   color: #39090c;
   background: #efdfdf;
-  font-family: Arial, sans-serif;
 }
 
-.welcome-panel {
+/* LEFT PANEL */
+
+.login-brand-panel {
   position: relative;
   display: flex;
-  min-height: 100vh;
   flex-direction: column;
   justify-content: space-between;
+  min-height: 100vh;
+  padding: 65px 5.5%;
   overflow: hidden;
-  padding: 40px;
-  color: #fff8f8;
-  background: #51090e;
+  color: #fff6f3;
+  background: #50090e;
 }
 
-.welcome-panel::before,
-.welcome-panel::after {
-  position: absolute;
-  width: 340px;
-  height: 340px;
-  border: 1px solid #a58a26;
-  border-radius: 50%;
-  content: '';
-  pointer-events: none;
-}
-
-.welcome-panel::before {
-  top: -180px;
-  right: -145px;
-}
-
-.welcome-panel::after {
-  bottom: -200px;
-  left: -170px;
-}
-
-.brand {
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 14px;
+.brand-content,
+.brand-footer {
+  position: relative;
+  z-index: 2;
 }
 
 .brand-logo {
-  display: grid;
-  width: 54px;
-  height: 54px;
-  place-items: center;
-  border-radius: 12px;
-  background: #79353b;
-  font-family: Georgia, serif;
-  font-size: 23px;
+  display: inline-block;
+  padding: 10px 13px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 17px;
   font-weight: bold;
+  font-style: italic;
 }
 
-.brand h2 {
-  margin: 0;
-  font-family: Georgia, serif;
-  font-size: 25px;
+.brand-label {
+  margin: 28px 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 4px;
 }
 
-.brand p {
-  margin: 4px 0 0;
-  color: #e0bfc1;
-  font-size: 14px;
-}
-
-.welcome-copy {
-  z-index: 1;
-  max-width: 480px;
-  margin: auto 0;
-}
-
-.eyebrow {
-  margin: 0 0 12px;
-  color: #d8b6b8;
-  font-size: 11px;
-  font-weight: bold;
-  letter-spacing: 3px;
-}
-
-.welcome-copy h1,
-.form-content h1 {
+.brand-content h1 {
+  max-width: 540px;
   margin: 0;
   font-family: Georgia, 'Times New Roman', serif;
-  font-size: clamp(28px, 3vw, 42px);
-  line-height: 1.2;
+  font-size: clamp(30px, 3.3vw, 44px);
+  font-weight: 400;
+  line-height: 1.13;
 }
 
-.description {
-  max-width: 360px;
-  margin-top: 20px;
-  color: #e0c7c8;
-  font-size: 14px;
+.brand-description {
+  max-width: 410px;
+  margin-top: 22px;
+  color: #d9bfc0;
+  font-size: 13px;
   line-height: 1.7;
 }
 
-.tagline {
-  z-index: 1;
-  margin: 0;
-  color: #e0bfc1;
-  font-family: Georgia, serif;
-  font-size: 14px;
+.brand-footer {
+  align-self: center;
+  margin-bottom: 0;
+  color: #e6cccc;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 17px;
   font-weight: bold;
-  text-align: center;
 }
 
-.form-panel {
+.decorative-circle {
+  position: absolute;
+  z-index: 1;
+  width: 430px;
+  height: 430px;
+  border: 1px solid rgba(190, 139, 32, 0.65);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.circle-top {
+  top: -205px;
+  right: -155px;
+}
+
+.circle-bottom {
+  bottom: -220px;
+  left: -145px;
+}
+
+/* RIGHT PANEL */
+
+.login-form-panel {
   display: flex;
-  min-width: 0;
   align-items: center;
   justify-content: center;
-  padding: 40px;
+  min-height: 100vh;
+  padding: 45px 8%;
+  background: #efdfdf;
 }
 
-.form-content {
+.login-content {
   width: 100%;
-  max-width: 520px;
+  max-width: 570px;
 }
 
-.eyebrow.dark {
-  margin-bottom: 10px;
-  color: #79585a;
+.login-heading {
+  margin-bottom: 48px;
 }
 
-.form-content h1 {
-  font-size: clamp(26px, 3vw, 38px);
-}
-
-.subtitle {
-  margin: 10px 0 30px;
-  color: #72595a;
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-.login-form {
-  display: flex;
-  flex-direction: column;
-  padding: 26px;
-  border: 1px solid #650f18;
-  border-radius: 10px;
-  background: #fffafa;
-  box-shadow: 0 3px 8px #39090c18;
-}
-
-.login-form label {
+.welcome-label {
   margin: 0 0 8px;
-  font-size: 13px;
-  font-weight: bold;
+  color: #806667;
+  font-size: 11px;
+  letter-spacing: 4px;
+  font-weight: 700;
 }
 
-.login-form input {
+.login-heading h2 {
+  margin: 0 0 8px;
+  color: #350609;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: clamp(29px, 3.2vw, 39px);
+  font-weight: 400;
+  line-height: 1.15;
+}
+
+.login-subtitle {
+  margin: 0;
+  color: #4c292b;
+  font-size: 12px;
+}
+
+/* LOGIN CARD */
+
+.login-card {
   width: 100%;
-  min-width: 0;
-  height: 44px;
-  padding: 0 12px;
-  border: 1px solid #bda3a4;
+  padding: 26px 24px 29px;
+  border: 1px solid #956d70;
+  border-radius: 10px;
+  background: #fffdfd;
+  box-shadow: 0 4px 7px rgba(47, 13, 15, 0.12);
+}
+
+.form-group {
+  margin-bottom: 22px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 10px;
+  color: #39090c;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.form-group input {
+  width: 100%;
+  height: 37px;
+  padding: 0 13px;
+  border: 1px solid #b8a5a6;
   border-radius: 7px;
-  outline-color: #650f18;
-  background: white;
-  font-size: 14px;
+  outline: none;
+  background: #fff;
+  color: #3c2021;
+  font-family: Arial, sans-serif;
+  font-size: 11px;
 }
 
-.login-form > input {
-  margin-bottom: 22px;
+.form-group input:focus {
+  border-color: #650f18;
+  box-shadow: 0 0 0 2px rgba(101, 15, 24, 0.08);
 }
 
-.password-field {
+.password-wrapper {
   position: relative;
-  margin-bottom: 22px;
 }
 
-.password-field input {
-  padding-right: 60px;
+.password-wrapper input {
+  padding-right: 55px;
 }
 
-.show-button {
+.password-toggle {
   position: absolute;
-  top: 0;
-  right: 8px;
-  height: 44px;
-  border: 0;
-  color: #650f18;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  padding: 4px 0;
+  border: none;
   background: transparent;
+  color: #8b2029;
+  font-size: 10px;
   cursor: pointer;
 }
 
-.show-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
+/* OPTIONS */
+
+.login-options {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: -9px;
+  margin-bottom: 14px;
 }
 
-.submit-button {
-  min-height: 46px;
-  border: 0;
-  border-radius: 8px;
-  color: white;
+.remember-option {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #4e292b;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.remember-option input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: #650f18;
+  cursor: pointer;
+}
+
+.forgot-password {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #8b2029;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.forgot-password:hover,
+.password-toggle:hover {
+  text-decoration: underline;
+}
+
+/* MESSAGES */
+
+.error-message,
+.success-message {
+  margin: 0 0 12px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.error-message {
+  color: #a12a32;
+}
+
+.success-message {
+  color: #397a49;
+}
+
+/* BUTTON */
+
+.sign-in-button {
+  width: 100%;
+  height: 37px;
+  margin-top: 0;
+  border: none;
+  border-radius: 18px;
   background: #650f18;
-  font-weight: bold;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
   cursor: pointer;
   transition: background 0.2s ease;
 }
 
-.submit-button:hover:not(:disabled) {
-  background: #4d080e;
+.sign-in-button:hover {
+  background: #7a1721;
 }
 
-.submit-button:disabled {
+.sign-in-button:disabled {
+  opacity: 0.65;
   cursor: not-allowed;
-  opacity: 0.7;
 }
 
-.error-message {
-  margin: -10px 0 16px;
-  color: #a00020;
-  font-size: 13px;
-}
+/* PRIVACY NOTE */
 
 .privacy-note {
-  margin: 22px 0 0;
-  color: #72595a;
-  font-size: 11px;
-  line-height: 1.6;
+  margin: 27px 0 0;
+  color: #4d292b;
   text-align: center;
+  font-size: 10px;
+  line-height: 1.6;
 }
 
-@media (max-width: 700px) {
+/* RESPONSIVE */
+
+@media (max-width: 850px) {
   .login-page {
     grid-template-columns: 1fr;
   }
 
-  .welcome-panel {
-    min-height: 220px;
-    padding: 22px;
+  .login-brand-panel {
+    min-height: 300px;
+    padding: 35px 7%;
   }
 
-  .brand-logo {
-    width: 44px;
-    height: 44px;
-    font-size: 19px;
+  .brand-content h1 {
+    font-size: 34px;
   }
 
-  .brand h2 {
-    font-size: 21px;
+  .brand-description {
+    margin-top: 12px;
   }
 
-  .welcome-copy {
-    margin: 28px 0 24px;
+  .brand-footer {
+    margin-top: 35px;
   }
 
-  .welcome-copy h1 {
-    font-size: 27px;
+  .login-form-panel {
+    min-height: auto;
+    padding: 55px 7%;
   }
 
-  .description {
-    margin-top: 10px;
-    font-size: 12px;
+  .login-heading {
+    margin-bottom: 30px;
+  }
+}
+
+@media (max-width: 480px) {
+  .login-brand-panel {
+    min-height: 270px;
   }
 
-  .tagline {
-    text-align: left;
-    font-size: 11px;
+  .brand-content h1 {
+    font-size: 29px;
   }
 
-  .form-panel {
-    padding: 28px 20px;
+  .brand-label {
+    letter-spacing: 3px;
   }
 
-  .login-form {
-    padding: 20px;
+  .login-form-panel {
+    padding: 40px 20px;
+  }
+
+  .login-heading h2 {
+    font-size: 29px;
+  }
+
+  .login-card {
+    padding: 23px 18px;
   }
 }
 </style>

@@ -77,9 +77,7 @@
             </td>
           </tr>
 
-          <tr
-            v-if="!loading && filteredStudents.length === 0"
-          >
+          <tr v-if="!loading && filteredStudents.length === 0">
             <td colspan="6" class="empty-state">
               {{
                 students.length === 0
@@ -130,6 +128,7 @@
 
         <div class="section-divider"></div>
 
+        <!-- PERSONAL INFORMATION -->
         <h3>Personal Information</h3>
 
         <div class="personal-grid">
@@ -181,17 +180,127 @@
 
         <div class="section-divider"></div>
 
+        <!-- TRANSACTION LOADING -->
+        <p
+          v-if="transactionsLoading"
+          class="transaction-message"
+        >
+          Loading student transactions...
+        </p>
+
+        <p
+          v-if="transactionError"
+          class="transaction-error"
+        >
+          {{ transactionError }}
+        </p>
+
+        <!-- CURRENT ACTIVE TRANSACTIONS -->
         <h3>Current Active Transactions</h3>
 
-        <div class="not-connected-message">
-          Transaction records are not connected to this page yet.
+        <div
+          v-if="!transactionsLoading && activeTransactions.length === 0"
+          class="not-connected-message"
+        >
+          This student has no current active transactions.
         </div>
 
+        <div
+          v-for="transaction in activeTransactions"
+          :key="transaction.id"
+          class="transaction-card"
+        >
+          <div class="transaction-top">
+            <strong>{{ transaction.serviceName }}</strong>
+
+            <span
+              class="transaction-status"
+              :class="getStatusClass(transaction.status)"
+            >
+              {{ formatStatus(transaction.status) }}
+            </span>
+          </div>
+
+          <div class="transaction-details">
+            <p>
+              <span>Type:</span>
+              {{ transaction.type }}
+            </p>
+
+            <p>
+              <span>Date:</span>
+              {{ formatDate(transaction.date) }}
+            </p>
+
+            <p v-if="transaction.purpose">
+              <span>Purpose:</span>
+              {{ transaction.purpose }}
+            </p>
+
+            <p v-if="transaction.details">
+              <span>Details:</span>
+              {{ transaction.details }}
+            </p>
+          </div>
+        </div>
+
+        <!-- TRANSACTION HISTORY -->
         <h3 class="history-heading">Transaction History</h3>
 
-        <div class="not-connected-message">
-          Transaction history will appear here once it is connected to the database.
+        <div
+          v-if="!transactionsLoading && historyTransactions.length === 0"
+          class="not-connected-message"
+        >
+          No previous transaction records found.
         </div>
+
+        <div
+          v-for="transaction in historyTransactions"
+          :key="transaction.id"
+          class="transaction-card history-card"
+        >
+          <div class="transaction-top">
+            <strong>{{ transaction.serviceName }}</strong>
+
+            <span
+              class="transaction-status"
+              :class="getStatusClass(transaction.status)"
+            >
+              {{ formatStatus(transaction.status) }}
+            </span>
+          </div>
+
+          <div class="transaction-details">
+            <p>
+              <span>Type:</span>
+              {{ transaction.type }}
+            </p>
+
+            <p>
+              <span>Date:</span>
+              {{ formatDate(transaction.date) }}
+            </p>
+
+            <p v-if="transaction.purpose">
+              <span>Purpose:</span>
+              {{ transaction.purpose }}
+            </p>
+
+            <p v-if="transaction.details">
+              <span>Details:</span>
+              {{ transaction.details }}
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          class="transaction-refresh"
+          @click="fetchTransactions(selectedStudent)"
+          :disabled="transactionsLoading"
+        >
+          {{ transactionsLoading ? 'Loading...' : 'Refresh Transactions' }}
+        </button>
 
       </section>
     </div>
@@ -212,10 +321,36 @@ import { supabase } from '../lib/Supabase.js'
 const searchQuery = ref('')
 const selectedStudent = ref(null)
 const students = ref([])
+
 const loading = ref(false)
 const errorMessage = ref('')
 
+const transactionsLoading = ref(false)
+const transactionError = ref('')
+
+const activeTransactions = ref([])
+const historyTransactions = ref([])
+
 let studentsChannel = null
+let appointmentsChannel = null
+let requestsChannel = null
+
+// OSA SERVICE IDS
+const OSA_SERVICE_IDS = [
+  '5c2ab6fc-5f24-4573-896a-f5a11ad6625e',
+  '65a94572-bce2-460f-b3e8-2ed568ee7bbf',
+  'e5121b34-a6d2-4370-a023-5153a73c97f8'
+]
+
+// TERMINAL TRANSACTION STATUSES
+const HISTORY_STATUSES = [
+  'completed',
+  'cancelled',
+  'canceled',
+  'no_show',
+  'rejected',
+  'declined'
+]
 
 // CONVERT DATABASE VALUES
 function mapStudent(profile) {
@@ -253,19 +388,20 @@ async function fetchStudents() {
       .eq('role', 'student')
       .order('full_name', { ascending: true })
 
-    if (error) {
-      throw error
-    }
+    if (error) throw error
 
     students.value = (data || []).map(mapStudent)
 
-    // UPDATE SELECTED STUDENT DETAILS
     if (selectedStudent.value) {
       const updatedStudent = students.value.find(
         student => student.id === selectedStudent.value.id
       )
 
-      selectedStudent.value = updatedStudent || null
+      if (updatedStudent) {
+        selectedStudent.value = updatedStudent
+      } else {
+        closeDetails()
+      }
     }
 
   } catch (error) {
@@ -296,15 +432,235 @@ const filteredStudents = computed(() => {
   })
 })
 
+// FORMAT STATUS
+function formatStatus(status) {
+  const labels = {
+    pending: 'Pending',
+    confirmed: 'Confirmed',
+    processing: 'Processing',
+    in_progress: 'In Progress',
+    checked_in: 'Checked In',
+    ready_for_pickup: 'Ready for Pick Up',
+    completed: 'Completed',
+    cancelled: 'Cancelled',
+    canceled: 'Cancelled',
+    no_show: 'No-Show',
+    rejected: 'Rejected',
+    declined: 'Declined'
+  }
+
+  return labels[String(status || '').toLowerCase()] ||
+    String(status || 'Unknown').replaceAll('_', ' ')
+}
+
+// STATUS CLASS
+function getStatusClass(status) {
+  const value = String(status || '').toLowerCase()
+
+  if (value === 'completed') return 'status-completed'
+
+  if (['cancelled', 'canceled', 'no_show', 'rejected', 'declined'].includes(value)) {
+    return 'status-cancelled'
+  }
+
+  if (value === 'ready_for_pickup') return 'status-ready'
+
+  if (value === 'confirmed') return 'status-confirmed'
+
+  return 'status-pending'
+}
+
+// FORMAT DATE
+function formatDate(value) {
+  if (!value) return 'Not available'
+
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    return 'Not available'
+  }
+
+  return date.toLocaleString('en-PH', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit'
+  })
+}
+
+// GET SERVICE NAME
+function getServiceName(service) {
+  if (!service) return 'OSA Service'
+
+  return (
+    service.service_name ||
+    service.name ||
+    service.title ||
+    service.service_title ||
+    'OSA Service'
+  )
+}
+
 // OPEN STUDENT DETAILS
-function openDetails(student) {
+async function openDetails(student) {
   selectedStudent.value = student
+
+  activeTransactions.value = []
+  historyTransactions.value = []
+  transactionError.value = ''
+
   document.body.style.overflow = 'hidden'
+
+  await fetchTransactions(student)
+}
+
+// FETCH APPOINTMENTS AND SERVICE REQUESTS
+async function fetchTransactions(student) {
+  if (!student?.id) return
+
+  transactionsLoading.value = true
+  transactionError.value = ''
+
+  try {
+    const [appointmentsResult, requestsResult] = await Promise.all([
+      supabase
+        .from('appointments')
+        .select(`
+          id,
+          student_id,
+          service_id,
+          scheduled_at,
+          status,
+          purpose,
+          created_at
+        `)
+        .eq('student_id', student.id)
+        .in('service_id', OSA_SERVICE_IDS)
+        .order('scheduled_at', { ascending: false }),
+
+      supabase
+        .from('service_requests')
+        .select(`
+          id,
+          student_id,
+          service_id,
+          request_type,
+          title,
+          details,
+          status,
+          submitted_at,
+          updated_at,
+          completed_at
+        `)
+        .eq('student_id', student.id)
+        .in('service_id', OSA_SERVICE_IDS)
+        .order('submitted_at', { ascending: false })
+    ])
+
+    if (appointmentsResult.error) {
+      throw appointmentsResult.error
+    }
+
+    if (requestsResult.error) {
+      throw requestsResult.error
+    }
+
+    const appointments = appointmentsResult.data || []
+    const requests = requestsResult.data || []
+
+    // GET SERVICE INFORMATION
+    const serviceIds = [
+      ...new Set([
+        ...appointments.map(item => item.service_id),
+        ...requests.map(item => item.service_id)
+      ].filter(Boolean))
+    ]
+
+    let serviceMap = {}
+
+    if (serviceIds.length > 0) {
+      const { data: services, error: servicesError } = await supabase
+        .from('office_services')
+        .select('*')
+        .in('id', serviceIds)
+
+      if (servicesError) {
+        console.error('FETCH SERVICES ERROR:', servicesError)
+      }
+
+      for (const service of services || []) {
+        serviceMap[service.id] = getServiceName(service)
+      }
+    }
+
+    // CONVERT APPOINTMENTS
+    const mappedAppointments = appointments.map(item => ({
+      id: `appointment-${item.id}`,
+      originalId: item.id,
+      serviceId: item.service_id,
+      serviceName: serviceMap[item.service_id] || 'OSA Appointment',
+      type: 'Appointment',
+      status: item.status,
+      date: item.scheduled_at || item.created_at,
+      purpose: item.purpose || '',
+      details: ''
+    }))
+
+    // CONVERT SERVICE REQUESTS
+    const mappedRequests = requests.map(item => ({
+      id: `request-${item.id}`,
+      originalId: item.id,
+      serviceId: item.service_id,
+      serviceName:
+        serviceMap[item.service_id] ||
+        item.title ||
+        'OSA Service Request',
+      type: item.request_type || 'Service Request',
+      status: item.status,
+      date: item.submitted_at,
+      purpose: item.title || '',
+      details: item.details || ''
+    }))
+
+    // COMBINE ALL TRANSACTIONS
+    const allTransactions = [
+      ...mappedAppointments,
+      ...mappedRequests
+    ].sort((a, b) => {
+      return new Date(b.date || 0) - new Date(a.date || 0)
+    })
+
+    // SEPARATE ACTIVE AND HISTORY
+    activeTransactions.value = allTransactions.filter(item => {
+      const status = String(item.status || '').toLowerCase()
+      return !HISTORY_STATUSES.includes(status)
+    })
+
+    historyTransactions.value = allTransactions.filter(item => {
+      const status = String(item.status || '').toLowerCase()
+      return HISTORY_STATUSES.includes(status)
+    })
+
+  } catch (error) {
+    console.error('FETCH STUDENT TRANSACTIONS ERROR:', error)
+
+    transactionError.value =
+      error.message || 'Unable to load student transactions.'
+
+  } finally {
+    transactionsLoading.value = false
+  }
 }
 
 // CLOSE STUDENT DETAILS
 function closeDetails() {
   selectedStudent.value = null
+
+  activeTransactions.value = []
+  historyTransactions.value = []
+  transactionError.value = ''
+
   document.body.style.overflow = ''
 }
 
@@ -312,6 +668,13 @@ function closeDetails() {
 function handleEscape(event) {
   if (event.key === 'Escape') {
     closeDetails()
+  }
+}
+
+// REFRESH OPEN STUDENT TRANSACTIONS
+function refreshSelectedTransactions() {
+  if (selectedStudent.value && !transactionsLoading.value) {
+    fetchTransactions(selectedStudent.value)
   }
 }
 
@@ -330,15 +693,47 @@ function subscribeToStudentChanges() {
         fetchStudents()
       }
     )
-    .subscribe(status => {
-      console.log('STUDENTS REALTIME STATUS:', status)
-    })
+    .subscribe()
+}
+
+function subscribeToTransactionChanges() {
+  appointmentsChannel = supabase
+    .channel('osa-student-appointments')
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'appointments'
+      },
+      () => {
+        refreshSelectedTransactions()
+      }
+    )
+    .subscribe()
+
+  requestsChannel = supabase
+    .channel('osa-student-service-requests')
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'service_requests'
+      },
+      () => {
+        refreshSelectedTransactions()
+      }
+    )
+    .subscribe()
 }
 
 // LIFECYCLE
 onMounted(() => {
   fetchStudents()
+
   subscribeToStudentChanges()
+  subscribeToTransactionChanges()
 
   window.addEventListener('keydown', handleEscape)
 })
@@ -351,6 +746,16 @@ onBeforeUnmount(() => {
   if (studentsChannel) {
     supabase.removeChannel(studentsChannel)
     studentsChannel = null
+  }
+
+  if (appointmentsChannel) {
+    supabase.removeChannel(appointmentsChannel)
+    appointmentsChannel = null
+  }
+
+  if (requestsChannel) {
+    supabase.removeChannel(requestsChannel)
+    requestsChannel = null
   }
 })
 </script>
@@ -638,7 +1043,26 @@ onBeforeUnmount(() => {
   color: #a02c2c !important;
 }
 
-/* TRANSACTION PLACEHOLDER */
+/* TRANSACTIONS */
+.transaction-message {
+  margin: 8px 0;
+  color: #927a7b;
+  font-family: Arial, sans-serif;
+  font-size: 10px;
+}
+
+.transaction-error {
+  margin: 8px 0;
+  padding: 10px;
+  border: 1px solid #e5bfc1;
+  border-radius: 6px;
+  background: #f9e5e6;
+  color: #8a2828;
+  font-family: Arial, sans-serif;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
 .not-connected-message {
   padding: 12px;
   border: 1px solid #e7cdcf;
@@ -650,9 +1074,106 @@ onBeforeUnmount(() => {
   line-height: 1.5;
 }
 
+.transaction-card {
+  margin-bottom: 9px;
+  padding: 11px 12px;
+  border: 1px solid #e7cdcf;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.transaction-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.transaction-top strong {
+  color: #350609;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.transaction-status {
+  flex-shrink: 0;
+  padding: 4px 7px;
+  border-radius: 20px;
+  font-family: Arial, sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.status-pending {
+  background: #f8edcf;
+  color: #8b6415;
+}
+
+.status-confirmed {
+  background: #e4f0e5;
+  color: #287a3a;
+}
+
+.status-ready {
+  background: #eee5f5;
+  color: #69418a;
+}
+
+.status-completed {
+  background: #e4f0e5;
+  color: #287a3a;
+}
+
+.status-cancelled {
+  background: #f8e3e3;
+  color: #a02c2c;
+}
+
+.transaction-details p {
+  margin: 4px 0;
+  color: #705b5c;
+  font-family: Arial, sans-serif;
+  font-size: 10px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.transaction-details p span {
+  color: #a18b8c;
+  font-weight: 700;
+}
+
 .details-modal .history-heading {
   margin-top: 14px;
   margin-bottom: 8px;
+}
+
+.history-card {
+  background: #fcf8f8;
+}
+
+.transaction-refresh {
+  width: 100%;
+  margin-top: 8px;
+  padding: 9px 12px;
+  border: 1px solid #59080e;
+  border-radius: 6px;
+  background: transparent;
+  color: #59080e;
+  font-family: Arial, sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.transaction-refresh:hover:not(:disabled) {
+  background: #f2e1e2;
+}
+
+.transaction-refresh:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* RESPONSIVE */
@@ -699,6 +1220,10 @@ onBeforeUnmount(() => {
 @media (max-width: 360px) {
   .personal-grid {
     grid-template-columns: 1fr;
+  }
+
+  .transaction-top {
+    flex-direction: column;
   }
 }
 </style>

@@ -1,3 +1,8 @@
+
+/* =====================================
+   REQUEST PAGE
+===================================== */
+
 .request-page {
     width: 100%;
     min-height: 100%;
@@ -6,8 +11,10 @@
     font-family: Arial, sans-serif;
 }
 
+/* HEADING */
+
 .request-heading {
-    margin: 23px 28px 30px;
+    margin: 23px 28px 25px;
 }
 
 .request-heading h1 {
@@ -21,31 +28,104 @@
 .request-heading p {
     margin: 7px 0 0;
     color: #a18b8c;
-    font-size: 14px;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 500;
     line-height: 1.5;
 }
 
-.request-toolbar {
+/* =====================================
+   MAIN WORKSPACE
+===================================== */
+
+.request-workspace {
+    display: grid;
+    grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.15fr);
+    align-items: start;
+    gap: 20px;
+    padding: 0 28px 25px;
+}
+
+/* =====================================
+   LEFT SIDE - STUDENT REQUESTS
+===================================== */
+
+.request-list-section {
+    min-width: 0;
+    padding: 15px;
+    border: 1px solid #d5c1c2;
+    border-radius: 14px;
+    background: #f8eeee;
+}
+
+.request-list-header {
     display: flex;
     align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.request-list-header h2 {
+    margin: 0;
+    color: #59080e;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 17px;
+}
+
+.request-list-header span {
+    color: #927879;
+    font-size: 9px;
+}
+
+/* SEARCH */
+
+.request-toolbar {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.request-search input {
+    width: 100%;
+    min-height: 34px;
+    box-sizing: border-box;
+    padding: 8px 11px;
+    border: 1px solid #d5c1c2;
+    border-radius: 7px;
+    outline: none;
+    background: #fff;
+    color: #35080b;
+    font-family: Arial, sans-serif;
+    font-size: 10px;
+}
+
+.request-search input:focus {
+    border-color: #59080e;
+}
+
+/* FILTERS */
+
+.request-filters {
+    display: flex;
     flex-wrap: wrap;
-    gap: 7px;
-    margin: 0 20px 20px 28px;
+    gap: 5px;
 }
 
 .request-filter {
-    min-height: 36px;
-    padding: 8px 14px;
-    border: 1px solid #7a252b;
-    border-radius: 22px;
+    min-height: 25px;
+    padding: 5px 9px;
+    border: 1px solid #cbbabb;
+    border-radius: 5px;
     background: transparent;
-    color: #35080b;
-    font-size: 13px;
-    font-weight: 600;
-    white-space: nowrap;
+    color: #59080e;
+    font-size: 9px;
     cursor: pointer;
-    transition: background 0.2s, color 0.2s;
+    transition: 0.2s ease;
+}
+
+.request-filter span {
+    margin-left: 3px;
 }
 
 .request-filter:hover,
@@ -55,48 +135,31 @@
     color: #fff;
 }
 
-.request-sort {
-    min-height: 32px;
-    max-width: 150px;
-    margin-left: auto;
-    padding: 5px 8px;
-    border: 1px solid #7a252b;
-    border-radius: 6px;
-    background: #f8eeee;
-    color: #35080b;
-    font-size: 10px;
-    cursor: pointer;
-}
-
-.request-workspace {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr);
-    align-items: stretch;
-    gap: 24px;
-    padding: 0 28px 25px;
-}
+/* REQUEST LIST */
 
 .request-list {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 9px;
     min-width: 0;
 }
 
+/* REQUEST CARD */
+
 .request-list-card {
     display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
     width: 100%;
-    min-height: 65px;
-    padding: 10px;
+    min-height: 66px;
+    padding: 11px;
     border: 1px solid #d5c1c2;
-    border-radius: 6px;
+    border-radius: 9px;
     background: #f8eeee;
     color: #35080b;
     text-align: left;
-    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
 }
 
 .request-list-card:hover {
@@ -104,8 +167,18 @@
 }
 
 .request-list-card.request-selected {
-    border-color: #c9afb1;
-    background: #d8c8c9;
+    border: 2px solid #6486a0;
+    background: #f4e8e8;
+}
+
+/* REQUEST CARD MAIN */
+
+.request-card-main {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
 }
 
 .request-card-info {
@@ -116,24 +189,83 @@
 }
 
 .request-card-info strong {
+    color: #35080b;
     font-size: 11px;
-    font-weight: 500;
+    font-weight: 600;
 }
 
-.request-card-info span,
+.request-card-info span {
+    color: #806d6d;
+    font-size: 9px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
 .request-card-info small {
     color: #927879;
     font-size: 9px;
-    line-height: 1.4;
 }
+
+/* REQUEST CARD ACTIONS */
+
+.request-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding-top: 8px;
+    border-top: 1px solid #eadada;
+}
+
+.request-card-actions button {
+    min-height: 25px;
+    padding: 5px 10px;
+    border: 1px solid #cbbabb;
+    border-radius: 5px;
+    background: transparent;
+    color: #59080e;
+    font-family: Arial, sans-serif;
+    font-size: 9px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: 0.2s ease;
+}
+
+.request-card-actions button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.request-view-button:hover {
+    background: #ead5d6;
+}
+
+.request-card-actions .request-confirm-button {
+    border-color: #59080e;
+    background: #59080e;
+    color: #fff;
+}
+
+.request-card-actions .request-confirm-button:hover {
+    background: #760d15;
+}
+
+.request-card-actions .request-cancel-action {
+    border-color: #c44b4b;
+    color: #a52b2b;
+}
+
+.request-card-actions .request-cancel-action:hover {
+    background: #f0d2d2;
+}
+
+/* STATUS BADGES */
 
 .request-status {
     flex-shrink: 0;
-    min-width: 66px;
-    padding: 4px 9px;
+    min-width: 55px;
+    padding: 4px 8px;
     border-radius: 10px;
-    background: #e7d65e;
-    color: #8d7900;
     font-size: 9px;
     text-align: center;
 }
@@ -148,53 +280,77 @@
     color: #8d7900;
 }
 
-.request-status.ready-for-pick-up {
-    background: #c8e3cb;
-    color: #285b31;
-}
-
-.request-status.claimed,
 .request-status.completed {
     background: #d8ead9;
     color: #285b31;
 }
+
+.request-status.cancelled {
+    background: #f0d2d2;
+    color: #943b3b;
+}
+
+/* EMPTY STATE */
 
 .request-empty {
     padding: 30px 12px;
     border: 1px solid #d5c1c2;
     border-radius: 8px;
     color: #927879;
-    font-size: 12px;
+    font-size: 11px;
     text-align: center;
+}
+
+.request-empty button {
+    display: block;
+    margin: 10px auto 0;
+    padding: 7px 14px;
+    border: none;
+    border-radius: 5px;
+    background: #59080e;
+    color: white;
+    cursor: pointer;
+}
+
+/* =====================================
+   RIGHT SIDE - REQUEST DETAILS
+===================================== */
+
+.request-right-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    min-width: 0;
 }
 
 .request-details {
     min-width: 0;
     padding: 15px;
-    border: 1px solid #cbbabb;
+    border: 1px solid #d5c1c2;
     border-radius: 15px;
     background: #f8eeee;
 }
+
+/* DETAILS HEADER */
 
 .details-topline {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
 }
 
-.details-topline>span {
-    color: #a18b8c;
-    font-size: 7px;
-    letter-spacing: 0.3px;
+.details-topline > span {
+    color: #806d6d;
+    font-size: 10px;
 }
 
 .details-close {
     padding: 3px 0;
     border: none;
     background: transparent;
-    color: #a18b8c;
+    color: #806d6d;
     font-size: 9px;
     cursor: pointer;
 }
@@ -203,37 +359,78 @@
     color: #59080e;
 }
 
+.details-close:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* REQUEST TITLE */
+
 .request-details h2 {
     margin: 0 0 15px;
     color: #59080e;
     font-family: Georgia, "Times New Roman", serif;
-    font-size: 16px;
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1.3;
 }
+
+/* STUDENT INFORMATION */
 
 .request-meta {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 12px 15px;
-    margin-bottom: 15px;
+    gap: 13px 15px;
+    margin-bottom: 17px;
 }
 
 .request-meta div {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 4px;
     min-width: 0;
 }
 
 .request-meta span {
-    color: #a18b8c;
-    font-size: 8px;
+    color: #806d6d;
+    font-size: 9px;
 }
 
 .request-meta strong {
     color: #35080b;
     font-size: 10px;
+    font-weight: 600;
     overflow-wrap: anywhere;
 }
+
+/* =====================================
+   PENDING REQUEST NOTICE
+===================================== */
+
+.request-pending-notice {
+    margin-top: 15px;
+    padding: 13px;
+    border: 1px solid #e2c6a0;
+    border-radius: 8px;
+    background: #fff8e9;
+}
+
+.request-pending-notice strong {
+    display: block;
+    color: #795c24;
+    font-size: 11px;
+}
+
+.request-pending-notice p {
+    margin: 6px 0 0;
+    color: #806d6d;
+    font-size: 10px;
+    line-height: 1.5;
+}
+
+/* =====================================
+   FORM FIELDS
+===================================== */
 
 .request-field {
     display: flex;
@@ -244,12 +441,11 @@
 
 .request-field label {
     color: #35080b;
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 600;
 }
 
 .request-field input,
-.request-field select,
 .request-field textarea {
     width: 100%;
     box-sizing: border-box;
@@ -263,9 +459,8 @@
     font-size: 10px;
 }
 
-.request-field input,
-.request-field select {
-    min-height: 32px;
+.request-field input {
+    min-height: 34px;
 }
 
 .request-field textarea {
@@ -274,79 +469,316 @@
 }
 
 .request-field input:focus,
-.request-field select:focus,
 .request-field textarea:focus {
     border-color: #59080e;
 }
 
+.request-field input:disabled,
+.request-field textarea:disabled {
+    background: #eee5e5;
+    cursor: not-allowed;
+}
+
+/* =====================================
+   SAVE AND NOTIFY
+===================================== */
+
 .request-save {
+    width: 100%;
     min-height: 35px;
     padding: 9px 14px;
-    border: 1px solid #a77f80;
+    border: 1px solid #59080e;
     border-radius: 6px;
-    background: #a77f80;
+    background: #59080e;
     color: #fff;
     font-size: 10px;
+    font-weight: 600;
     cursor: pointer;
+    transition: 0.2s ease;
 }
 
 .request-save:hover {
-    border-color: #59080e;
-    background: #59080e;
+    border-color: #35080b;
+    background: #35080b;
 }
+
+.request-save:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* =====================================
+   STATUS ACTIONS
+===================================== */
 
 .request-status-actions {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
-    margin-top: 20px;
+    margin-top: 11px;
 }
 
 .request-status-actions button {
-    min-height: 22px;
-    padding: 4px 6px;
-    border: 1px solid #ead5d6;
-    border-radius: 4px;
+    min-height: 24px;
+    padding: 5px 9px;
+    border: 1px solid #d5c1c2;
+    border-radius: 5px;
     background: transparent;
     color: #59080e;
     font-size: 9px;
     cursor: pointer;
+    transition: 0.2s ease;
 }
 
 .request-status-actions button:hover {
     background: #ead5d6;
 }
 
-.request-status-actions button.current-status {
-    border-color: #59080e;
-    background: #59080e;
-    color: #fff;
+.request-status-actions button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
+
+/* =====================================
+   REQUEST OVERVIEW
+===================================== */
+
+.request-overview {
+    min-width: 0;
+    padding: 15px;
+    border: 1px solid #d5c1c2;
+    border-radius: 15px;
+    background: #f8eeee;
+}
+
+.request-overview h3 {
+    margin: 0 0 20px;
+    color: #59080e;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 17px;
+    font-weight: 700;
+}
+
+/* TIMELINE */
+
+.overview-timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 19px;
+}
+
+.overview-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 11px;
+}
+
+.overview-dot {
+    width: 8px;
+    height: 8px;
+    min-width: 8px;
+    margin-top: 3px;
+    border: 1.5px solid #779b83;
+    border-radius: 50%;
+    background: transparent;
+}
+
+.overview-item strong {
+    display: block;
+    color: #35080b;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.overview-item p {
+    margin: 5px 0 0;
+    color: #927879;
+    font-size: 9px;
+}
+
+/* =====================================
+   NO SELECTION
+===================================== */
 
 .details-placeholder {
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 215px;
+    min-height: 250px;
     color: #a18b8c;
-    font-size: 10px;
+    font-size: 11px;
     text-align: center;
 }
 
-@media (max-width: 900px) {
-    .request-heading {
-        margin: 20px 15px;
+/* =====================================
+   CONFIRMATION AND SUCCESS MODALS
+===================================== */
+
+.request-success-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(35, 20, 20, 0.55);
+    animation: requestOverlayFade 0.2s ease;
+}
+
+.request-success-modal {
+    width: 90%;
+    max-width: 420px;
+    box-sizing: border-box;
+    padding: 24px 26px;
+    border: 1px solid #e8dada;
+    border-radius: 18px;
+    background: #f9eeee;
+    box-shadow: 0 12px 35px rgba(0, 0, 0, 0.2);
+    animation: requestModalAppear 0.25s ease;
+}
+
+.request-success-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.request-success-icon,
+.request-confirm-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 52px;
+    height: 52px;
+    min-width: 52px;
+    border-radius: 12px;
+    background: #803b43;
+    color: white;
+    font-family: Georgia, serif;
+    font-size: 30px;
+    font-weight: bold;
+}
+
+.request-success-header h2 {
+    margin: 0;
+    color: #400b10;
+    font-family: Georgia, serif;
+    font-size: 23px;
+    font-weight: bold;
+}
+
+.request-success-message {
+    margin: 24px 0;
+    color: #806d6d;
+    font-family: Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.request-success-actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+}
+
+.request-success-button {
+    padding: 11px 23px;
+    border: 1px solid #570b13;
+    border-radius: 9px;
+    background: #570b13;
+    color: white;
+    font-size: 13px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: 0.2s ease;
+}
+
+.request-success-button:hover {
+    background: #7a1722;
+}
+
+.request-success-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.request-cancel-button {
+    padding: 11px 20px;
+    border: 1px solid #cbbabb;
+    border-radius: 9px;
+    background: transparent;
+    color: #59080e;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.request-cancel-button:hover {
+    background: #ead5d6;
+}
+
+.request-cancel-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* =====================================
+   ANIMATIONS
+===================================== */
+
+@keyframes requestOverlayFade {
+    from {
+        opacity: 0;
     }
-    .request-toolbar {
-        margin: 0 15px 20px;
+
+    to {
+        opacity: 1;
     }
+}
+
+@keyframes requestModalAppear {
+    from {
+        opacity: 0;
+        transform: translateY(12px) scale(0.97);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+/* =====================================
+   RESPONSIVE
+===================================== */
+
+@media (max-width: 1000px) {
     .request-workspace {
-        grid-template-columns: 1fr;
-        gap: 15px;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+        gap: 12px;
         padding: 0 15px 25px;
     }
-    .request-details {
-        min-height: 200px;
+
+    .request-list-section,
+    .request-details,
+    .request-overview {
+        padding: 12px;
+    }
+}
+
+@media (max-width: 750px) {
+    .request-workspace {
+        grid-template-columns: 1fr;
+    }
+
+    .request-right-panel {
+        width: 100%;
+    }
+
+    .request-heading {
+        margin: 20px 15px;
     }
 }
 
@@ -354,30 +786,29 @@
     .request-heading h1 {
         font-size: 19px;
     }
+
     .request-heading p {
-        font-size: 12px;
-    }
-    .request-toolbar {
-        gap: 6px;
-    }
-    .request-filter {
-        min-height: 32px;
-        padding: 7px 10px;
         font-size: 11px;
     }
-    .request-sort {
-        margin-left: 0;
+
+    .request-details h2 {
+        font-size: 18px;
     }
-    .request-list-card {
-        gap: 7px;
-        padding: 9px;
+
+    .request-meta {
+        gap: 12px;
     }
-    .request-status {
-        min-width: 0;
-        max-width: 100px;
-        white-space: normal;
+
+    .request-success-modal {
+        max-width: 340px;
+        padding: 20px;
     }
-    .request-details {
-        padding: 12px;
+
+    .request-success-header h2 {
+        font-size: 20px;
+    }
+
+    .request-success-message {
+        font-size: 13px;
     }
 }

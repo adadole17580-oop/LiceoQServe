@@ -9,7 +9,8 @@ const emit = defineEmits(['navigate'])
 // OSA SERVICE IDS
 const OSA_SERVICE_IDS = [
   '5c2ab6fc-5f24-4573-896a-f5a11ad6625e',
-  '65a94572-bce2-460f-b3e8-2ed568ee7bbf'
+  '65a94572-bce2-460f-b3e8-2ed568ee7bbf',
+  'e5121b34-a6d2-4370-a023-5153a73c97f8'
 ]
 
 // DASHBOARD COUNTS
@@ -29,7 +30,7 @@ let isFetching = false
 let refreshAgain = false
 let isMounted = false
 
-// DASHBOARD CARDS
+// DASHBOARD STAT CARDS
 const stats = computed(() => [
   {
     title: "TODAY'S APPOINTMENTS",
@@ -54,8 +55,9 @@ function handleCardClick(index) {
     emit('navigate', 'Appointments')
   } else if (index === 1) {
     emit('navigate', 'Request', 'Pending')
-  } else {
-    emit('navigate', 'Request', 'Ready for Pick Up')
+  } else if (index === 2) {
+    // READY FOR PICK UP GOES TO APPOINTMENTS PAGE
+    emit('navigate', 'Appointments')
   }
 }
 
@@ -69,27 +71,6 @@ function updateCurrentDate() {
   })
 }
 
-// PHILIPPINE TIME DATE RANGE
-function getTodayDateRange() {
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Manila',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  })
-
-  const today = formatter.format(new Date())
-  const startDate = new Date(`${today}T00:00:00+08:00`)
-
-  const endDate = new Date(startDate)
-  endDate.setDate(endDate.getDate() + 1)
-
-  return {
-    start: startDate.toISOString(),
-    end: endDate.toISOString()
-  }
-}
-
 // FORMAT APPOINTMENT TIME
 function formatAppointmentTime(date) {
   if (!date) return 'Time not available'
@@ -98,6 +79,18 @@ function formatAppointmentTime(date) {
     hour: 'numeric',
     minute: '2-digit',
     hour12: true,
+    timeZone: 'Asia/Manila'
+  })
+}
+
+// FORMAT APPOINTMENT DATE
+function formatAppointmentDate(date) {
+  if (!date) return 'Date not available'
+
+  return new Date(date).toLocaleDateString('en-PH', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
     timeZone: 'Asia/Manila'
   })
 }
@@ -136,10 +129,8 @@ function statusClass(status) {
   return 'pending'
 }
 
-// FETCH TODAY'S APPOINTMENTS
+// FETCH OSA APPOINTMENTS
 async function fetchTodayAppointments() {
-  const { start, end } = getTodayDateRange()
-
   const { data, error } = await supabase
     .from('appointments')
     .select(`
@@ -147,22 +138,23 @@ async function fetchTodayAppointments() {
       student_id,
       service_id,
       scheduled_at,
+      created_at,
       status,
       purpose
     `)
     .in('service_id', OSA_SERVICE_IDS)
-    .gte('scheduled_at', start)
-    .lt('scheduled_at', end)
-    .neq('status', 'cancelled')
-    .neq('status', 'completed')
-    .neq('status', 'no_show')
-    .order('scheduled_at', { ascending: true })
+    .not(
+      'status',
+      'in',
+      '("cancelled","completed","no_show","rejected")'
+    )
+    .order('created_at', { ascending: false })
 
   if (error) throw error
 
   const appointmentData = data || []
 
-  // FETCH STUDENT PROFILES
+  // GET STUDENT IDS
   const studentIds = [
     ...new Set(
       appointmentData
@@ -173,6 +165,7 @@ async function fetchTodayAppointments() {
 
   let profiles = []
 
+  // FETCH STUDENT PROFILES
   if (studentIds.length > 0) {
     const { data: profileData, error: profileError } = await supabase
       .from('profiles')
@@ -184,10 +177,12 @@ async function fetchTodayAppointments() {
     profiles = profileData || []
   }
 
+  // CREATE PROFILE LOOKUP
   const profileMap = new Map(
     profiles.map(profile => [profile.id, profile])
   )
 
+  // DISPLAY APPOINTMENTS
   appointments.value = appointmentData.map(item => {
     const profile = profileMap.get(item.student_id)
 
@@ -198,14 +193,20 @@ async function fetchTodayAppointments() {
     }
   })
 
+  // UPDATE APPOINTMENT CARD COUNT
   todayAppointments.value = appointments.value.length
+
+  console.log('OSA APPOINTMENTS:', appointments.value)
 }
 
 // FETCH PENDING REQUESTS
 async function fetchPendingRequests() {
   const { count, error } = await supabase
     .from('service_requests')
-    .select('*', { count: 'exact', head: true })
+    .select('*', {
+      count: 'exact',
+      head: true
+    })
     .in('service_id', OSA_SERVICE_IDS)
     .eq('status', 'pending')
 
@@ -215,21 +216,28 @@ async function fetchPendingRequests() {
 }
 
 // FETCH READY FOR PICK UP
+// APPOINTMENTS TABLE ONLY
 async function fetchReadyForPickup() {
   const { count, error } = await supabase
-    .from('service_requests')
-    .select('*', { count: 'exact', head: true })
+    .from('appointments')
+    .select('*', {
+      count: 'exact',
+      head: true
+    })
     .in('service_id', OSA_SERVICE_IDS)
     .eq('status', 'ready_for_pickup')
 
   if (error) throw error
 
   readyForPickup.value = count ?? 0
+
+  console.log('READY FOR PICK UP APPOINTMENTS:', readyForPickup.value)
 }
 
 // FETCH ALL DASHBOARD DATA
 async function fetchDashboardData() {
-  // If another fetch is ongoing, schedule another fetch afterward.
+  if (!isMounted) return
+
   if (isFetching) {
     refreshAgain = true
     return
@@ -237,33 +245,42 @@ async function fetchDashboardData() {
 
   isFetching = true
 
-  do {
-    refreshAgain = false
+  try {
+    do {
+      refreshAgain = false
 
-    try {
-      await Promise.all([
-        fetchTodayAppointments(),
-        fetchPendingRequests(),
-        fetchReadyForPickup()
-      ])
+      try {
+        await Promise.all([
+          fetchTodayAppointments(),
+          fetchPendingRequests(),
+          fetchReadyForPickup()
+        ])
 
-      errorMessage.value = ''
+        errorMessage.value = ''
 
-      console.log('OSA DASHBOARD UPDATED:', {
-        todayAppointments: todayAppointments.value,
-        pendingRequests: pendingRequests.value,
-        readyForPickup: readyForPickup.value
-      })
-    } catch (error) {
-      console.error('OSA dashboard fetch error:', error)
+        console.log('OSA DASHBOARD COUNTS:', {
+          todayAppointments: todayAppointments.value,
+          pendingRequests: pendingRequests.value,
+          readyForPickup: readyForPickup.value
+        })
 
-      errorMessage.value =
-        error.message || 'Unable to load dashboard data.'
+      } catch (error) {
+        console.error('Dashboard fetch error:', error)
+
+        errorMessage.value =
+          error.message || 'Unable to load dashboard data.'
+      }
+
+    } while (refreshAgain && isMounted)
+
+  } finally {
+    isFetching = false
+    loading.value = false
+
+    if (refreshAgain && isMounted) {
+      fetchDashboardData()
     }
-  } while (refreshAgain && isMounted)
-
-  isFetching = false
-  loading.value = false
+  }
 }
 
 // SUPABASE REALTIME
@@ -279,7 +296,11 @@ function subscribeToDashboardChanges() {
         table: 'appointments'
       },
       (payload) => {
-        console.log('OSA appointment change detected:', payload.eventType)
+        console.log(
+          'APPOINTMENT DATABASE CHANGE:',
+          payload.eventType
+        )
+
         fetchDashboardData()
       }
     )
@@ -292,19 +313,22 @@ function subscribeToDashboardChanges() {
         table: 'service_requests'
       },
       (payload) => {
-        console.log('OSA service request change detected:', payload.eventType)
+        console.log(
+          'SERVICE REQUEST DATABASE CHANGE:',
+          payload.eventType
+        )
+
         fetchDashboardData()
       }
     )
 
     .subscribe((status, error) => {
-      console.log('OSA dashboard realtime status:', status)
+      console.log('OSA REALTIME STATUS:', status)
 
       if (error) {
-        console.error('OSA dashboard realtime error:', error)
+        console.error('Realtime subscription error:', error)
       }
 
-      // Fetch the latest data once Realtime is connected.
       if (status === 'SUBSCRIBED') {
         fetchDashboardData()
       }
@@ -317,10 +341,8 @@ onMounted(() => {
 
   updateCurrentDate()
 
-  // Initial dashboard fetch
   fetchDashboardData()
 
-  // Listen for database changes
   subscribeToDashboardChanges()
 })
 
@@ -373,14 +395,20 @@ onUnmounted(() => {
         </div>
 
         <!-- LOADING -->
-        <div v-if="loading" class="record-row">
+        <div
+          v-if="loading"
+          class="record-row"
+        >
           <div class="record-info">
             <span>Loading appointments...</span>
           </div>
         </div>
 
         <!-- ERROR -->
-        <div v-else-if="errorMessage" class="record-row">
+        <div
+          v-else-if="errorMessage"
+          class="record-row"
+        >
           <div class="record-info">
             <strong>Unable to load dashboard</strong>
             <span>{{ errorMessage }}</span>
@@ -393,9 +421,9 @@ onUnmounted(() => {
           class="record-row"
         >
           <div class="record-info">
-            <strong>No appointments today</strong>
+            <strong>No appointments available</strong>
             <span>
-              There are currently no scheduled appointments.
+              New OSA appointments will appear here.
             </span>
           </div>
         </div>
@@ -419,7 +447,12 @@ onUnmounted(() => {
             </span>
 
             <small>
-              {{ item.studentNumber }}
+              Student ID: {{ item.studentNumber }}
+            </small>
+
+            <small>
+              Appointment Date:
+              {{ formatAppointmentDate(item.scheduled_at) }}
             </small>
           </div>
 

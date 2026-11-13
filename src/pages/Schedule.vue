@@ -1,23 +1,27 @@
 
 <template>
   <section class="schedule-page">
+
+    <!-- PAGE HEADING -->
     <div class="page-heading">
-      <h1>SCHEDULE MANAGEMENT</h1>
-      <p>Manage office hours, availability, slots and blocked dates.</p>
+      <h1>Schedule Management</h1>
+      <p>Manage office hours, availability, slots and blocked dates</p>
     </div>
 
-    <p v-if="loading" class="status-message">
-      Loading schedule...
-    </p>
-
+    <!-- ERROR MESSAGE -->
     <p v-if="errorMessage" class="error-message">
       {{ errorMessage }}
     </p>
 
+    <!-- MAIN SCHEDULE LAYOUT -->
     <div class="schedule-layout">
+
       <!-- OFFICE HOURS -->
       <section class="schedule-card office-hours-card">
-        <h2>Office Hours</h2>
+
+        <div class="schedule-card-header">
+          <h2>Office Hours</h2>
+        </div>
 
         <div
           v-for="officeHour in officeHours"
@@ -25,94 +29,247 @@
           class="office-hour-row"
         >
           <span>{{ officeHour.day }}</span>
-          <strong>{{ officeHour.hours }}</strong>
+
+          <strong
+            :class="{ closed: officeHour.hours === 'Closed' }"
+          >
+            {{ officeHour.hours }}
+          </strong>
         </div>
 
-        <p v-if="!loading && officeHours.length === 0" class="empty-state">
-          No office hours available.
-        </p>
       </section>
 
-      <!-- BLOCK A DATE -->
+      <!-- BLOCK A DATE OR TIME -->
       <section class="schedule-card block-date-card">
+
         <h2>Block a date or time</h2>
 
         <form @submit.prevent="blockDate">
-          <input
-            v-model="selectedDate"
-            type="date"
-            lang="en-US"
-            aria-label="Select date to block"
-            :min="today"
-            required
-          />
 
+          <!-- DATE -->
+          <div class="schedule-form-field">
+            <input
+              v-model="selectedDate"
+              type="date"
+              :min="today"
+              aria-label="Select date"
+              required
+              :disabled="saving"
+            />
+          </div>
+
+          <!-- TIME -->
+          <div class="schedule-form-field">
+            <select
+              v-model="selectedTime"
+              required
+              aria-label="Choose a time"
+              :disabled="saving"
+            >
+              <option value="" disabled>
+                Choose a time
+              </option>
+
+              <option
+                v-for="time in timeOptions"
+                :key="time.value"
+                :value="time.value"
+              >
+                {{ time.label }}
+              </option>
+            </select>
+          </div>
+
+          <!-- OPTIONAL REASON -->
+          <div class="schedule-form-field">
+            <input
+              v-model="reason"
+              type="text"
+              placeholder="Reason (optional)"
+              maxlength="150"
+              :disabled="saving"
+            />
+          </div>
+
+          <!-- SUBMIT -->
           <button
             type="submit"
             class="block-button"
-            :disabled="saving"
+            :disabled="saving || !selectedDate || !selectedTime"
           >
-            {{ saving ? 'Saving...' : 'Block date' }}
+            {{ saving ? 'Blocking...' : 'BLOCK DATE AND TIME' }}
           </button>
+
         </form>
 
-        <div class="blocked-dates">
-          <div
-            v-for="item in blockedDates"
-            :key="item.id"
-            class="blocked-date-item"
-          >
-            <span>{{ item.label }}</span>
-
-            <button
-              type="button"
-              class="delete-button"
-              :disabled="deletingId === item.id"
-              @click="deleteBlockedDate(item)"
-            >
-              {{ deletingId === item.id ? 'Deleting...' : 'Delete' }}
-            </button>
-          </div>
-
-          <p v-if="!loading && blockedDates.length === 0" class="empty-state">
-            No blocked dates.
-          </p>
-        </div>
       </section>
+
     </div>
+
+    <!-- BLOCKED DATES AND TIMES -->
+    <section class="schedule-card blocked-section">
+
+      <div class="blocked-header">
+
+        <h2>Blocked Dates and Times</h2>
+
+        <div class="blocked-header-actions">
+
+          <span class="blocked-count">
+            {{ blockedDates.length }}
+            {{ blockedDates.length === 1 ? 'blocked' : 'blocked' }}
+          </span>
+
+          <!-- REFRESH BUTTON -->
+          <button
+            type="button"
+            class="refresh-button"
+            @click="refreshSchedules"
+            :disabled="loading"
+          >
+            {{ loading ? 'Loading...' : 'Refresh' }}
+          </button>
+
+        </div>
+
+      </div>
+
+      <p v-if="loading && blockedDates.length === 0" class="empty-state">
+        Loading blocked dates...
+      </p>
+
+      <div
+        v-for="item in blockedDates"
+        :key="item.id"
+        class="blocked-date-item"
+      >
+
+        <div class="blocked-date-info">
+          <strong>{{ item.dateLabel }}</strong>
+
+          <span>{{ item.timeLabel }}</span>
+
+          <small v-if="item.note">
+            {{ item.note }}
+          </small>
+        </div>
+
+        <button
+          type="button"
+          class="remove-button"
+          :disabled="deletingId === item.id"
+          @click="deleteBlockedDate(item)"
+        >
+          {{ deletingId === item.id ? 'Removing...' : 'Remove' }}
+        </button>
+
+      </div>
+
+      <p
+        v-if="!loading && blockedDates.length === 0"
+        class="empty-state"
+      >
+        No blocked dates or times.
+      </p>
+
+    </section>
+
+    <!-- REMOVE CONFIRMATION MODAL -->
+    <div
+      v-if="showDeleteConfirm"
+      class="schedule-modal-overlay"
+      @click.self="cancelDelete"
+    >
+      <div class="schedule-confirm-modal">
+
+        <div class="confirm-icon">!</div>
+
+        <h2>Remove Blocked Schedule?</h2>
+
+        <p>
+          Are you sure you want to remove the blocked schedule on
+          <strong>{{ selectedBlockedDate?.dateLabel }}</strong>
+          ({{ selectedBlockedDate?.timeLabel }})?
+        </p>
+
+        <div class="confirm-actions">
+
+          <button
+            type="button"
+            class="confirm-cancel-button"
+            @click="cancelDelete"
+            :disabled="deletingId !== null"
+          >
+            Cancel
+          </button>
+
+          <button
+            type="button"
+            class="confirm-remove-button"
+            @click="confirmDeleteBlockedDate"
+            :disabled="deletingId !== null"
+          >
+            {{ deletingId !== null ? 'Removing...' : 'Remove' }}
+          </button>
+
+        </div>
+
+      </div>
+    </div>
+
+    <!-- SUCCESS MESSAGE FOR BLOCKING ONLY -->
+    <div
+      v-if="showSuccess"
+      class="schedule-success-overlay"
+      @click.self="showSuccess = false"
+    >
+      <div class="schedule-success-modal">
+
+        <div class="success-icon">✓</div>
+
+        <h2>{{ successTitle }}</h2>
+
+        <p>{{ successMessage }}</p>
+
+        <button
+          type="button"
+          @click="showSuccess = false"
+        >
+          OK
+        </button>
+
+      </div>
+    </div>
+
   </section>
 </template>
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { supabase } from '../lib/Supabase.js'
+import './Schedule.css'
 
-const today = getLocalDate()
+/* =====================================
+   OFFICE HOURS
+===================================== */
 
-const officeHours = ref([])
-const blockedDates = ref([])
-const selectedDate = ref('')
+const officeHours = ref([
+  { day: 'Sunday', hours: 'Closed' },
+  { day: 'Monday', hours: '9:00 AM - 5:00 PM' },
+  { day: 'Tuesday', hours: '9:00 AM - 5:00 PM' },
+  { day: 'Wednesday', hours: '9:00 AM - 5:00 PM' },
+  { day: 'Thursday', hours: '9:00 AM - 5:00 PM' },
+  { day: 'Friday', hours: '9:00 AM - 5:00 PM' },
+  { day: 'Saturday', hours: '9:00 AM - 12:00 PM' }
+])
 
-const loading = ref(false)
-const saving = ref(false)
-const deletingId = ref(null)
-const errorMessage = ref('')
-
-let officeId = null
-let scheduleChannel = null
-
-const daysOfWeek = [
-  'Sunday',
-  'Monday',
-  'Tuesday',
-  'Wednesday',
-  'Thursday',
-  'Friday',
-  'Saturday'
-]
+/* =====================================
+   DATE AND TIME OPTIONS
+===================================== */
 
 function getLocalDate() {
   const date = new Date()
+
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
@@ -120,15 +277,102 @@ function getLocalDate() {
   return `${year}-${month}-${day}`
 }
 
+const today = getLocalDate()
+
+const selectedDate = ref('')
+const selectedTime = ref('')
+const reason = ref('')
+
+const timeOptions = [
+  {
+    label: 'All Day',
+    value: 'all-day'
+  },
+  {
+    label: '9:00 AM - 10:00 AM',
+    value: '09:00|10:00'
+  },
+  {
+    label: '10:00 AM - 11:00 AM',
+    value: '10:00|11:00'
+  },
+  {
+    label: '11:00 AM - 12:00 NN',
+    value: '11:00|12:00'
+  },
+  {
+    label: '12:00 NN - 1:00 PM',
+    value: '12:00|13:00'
+  },
+  {
+    label: '1:00 PM - 2:00 PM',
+    value: '13:00|14:00'
+  },
+  {
+    label: '2:00 PM - 3:00 PM',
+    value: '14:00|15:00'
+  },
+  {
+    label: '3:00 PM - 4:00 PM',
+    value: '15:00|16:00'
+  },
+  {
+    label: '4:00 PM - 5:00 PM',
+    value: '16:00|17:00'
+  }
+]
+
+/* =====================================
+   STATES
+===================================== */
+
+const blockedDates = ref([])
+
+const loading = ref(false)
+const saving = ref(false)
+const deletingId = ref(null)
+
+const errorMessage = ref('')
+
+// SUCCESS MODAL (BLOCKING ONLY)
+const showSuccess = ref(false)
+const successTitle = ref('')
+const successMessage = ref('')
+
+// REMOVE CONFIRMATION MODAL
+const showDeleteConfirm = ref(false)
+const selectedBlockedDate = ref(null)
+
+let officeId = null
+let scheduleChannel = null
+
+/* =====================================
+   HELPER FUNCTIONS
+===================================== */
+
 function formatDate(dateString) {
+  if (!dateString) return ''
+
   const [year, month, day] = dateString.split('-')
-  return `${month}-${day}-${year}`
+
+  const date = new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day)
+  )
+
+  return date.toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
+  })
 }
 
 function formatTime(timeString) {
   if (!timeString) return ''
 
   const [hour, minute] = timeString.split(':')
+
   const date = new Date()
   date.setHours(Number(hour), Number(minute), 0, 0)
 
@@ -138,19 +382,16 @@ function formatTime(timeString) {
   })
 }
 
-function formatOfficeHours(schedule) {
-  if (schedule.is_closed) {
-    return 'Closed'
-  }
-
-  if (!schedule.opens_at || !schedule.closes_at) {
-    return 'Not set'
-  }
-
-  return `${formatTime(schedule.opens_at)} - ${formatTime(schedule.closes_at)}`
+function showSuccessMessage(title, message) {
+  successTitle.value = title
+  successMessage.value = message
+  showSuccess.value = true
 }
 
-// GET LOGGED-IN STAFF OFFICE
+/* =====================================
+   GET LOGGED-IN STAFF OFFICE
+===================================== */
+
 async function getStaffOffice() {
   const { data: authData, error: authError } =
     await supabase.auth.getUser()
@@ -163,11 +404,12 @@ async function getStaffOffice() {
     throw new Error('Please log in first.')
   }
 
-  const { data: profile, error: profileError } = await supabase
-    .from('profiles')
-    .select('id, role, office_id')
-    .eq('id', user.id)
-    .single()
+  const { data: profile, error: profileError } =
+    await supabase
+      .from('profiles')
+      .select('id, role, office_id')
+      .eq('id', user.id)
+      .single()
 
   if (profileError) throw profileError
 
@@ -182,7 +424,10 @@ async function getStaffOffice() {
   officeId = profile.office_id
 }
 
-// FETCH SCHEDULES FROM SUPABASE
+/* =====================================
+   FETCH BLOCKED DATES AND TIMES
+===================================== */
+
 async function fetchSchedules() {
   if (!officeId) return
 
@@ -194,57 +439,101 @@ async function fetchSchedules() {
       .from('office_schedules')
       .select('*')
       .eq('office_id', officeId)
+      .not('effective_date', 'is', null)
       .order('effective_date', {
-        ascending: true,
-        nullsFirst: true
-      })
-      .order('day_of_week', {
         ascending: true
       })
 
     if (error) throw error
 
-    const schedules = data || []
+    blockedDates.value = (data || []).map(item => {
 
-    // Regular weekly office hours
-    officeHours.value = schedules
-      .filter(item => item.effective_date === null)
-      .map(item => ({
-        day: daysOfWeek[item.day_of_week] || 'Unknown',
-        hours: formatOfficeHours(item)
-      }))
+      let timeLabel = 'All Day'
 
-    // Blocked dates
-    blockedDates.value = schedules
-      .filter(item => item.effective_date !== null && item.is_closed)
-      .map(item => ({
+      if (item.opens_at && item.closes_at) {
+        timeLabel =
+          `${formatTime(item.opens_at)} - ${formatTime(item.closes_at)}`
+      }
+
+      return {
         id: item.id,
         date: item.effective_date,
-        label: `${formatDate(item.effective_date)} - ${item.note || 'Blocked Date'}`
-      }))
+        dateLabel: formatDate(item.effective_date),
+        timeLabel,
+        note: item.note || ''
+      }
+    })
+
   } catch (error) {
     console.error('Unable to fetch schedules:', error)
-    errorMessage.value = error.message || 'Unable to load schedules.'
+
+    errorMessage.value =
+      error.message || 'Unable to load schedules.'
+
   } finally {
     loading.value = false
   }
 }
 
-// BLOCK A DATE
-async function blockDate() {
-  if (!selectedDate.value || !officeId) return
+/* =====================================
+   REFRESH SCHEDULES
+===================================== */
 
-  if (selectedDate.value < today) {
-    window.alert('Please select a future date.')
+async function refreshSchedules() {
+  await fetchSchedules()
+}
+
+/* =====================================
+   BLOCK A DATE OR TIME
+===================================== */
+
+async function blockDate() {
+  if (!selectedDate.value || !selectedTime.value || !officeId) {
     return
   }
 
-  const alreadyBlocked = blockedDates.value.some(
-    item => item.date === selectedDate.value
-  )
+  if (selectedDate.value < today) {
+    errorMessage.value = 'Please select today or a future date.'
+    return
+  }
+
+  const [opensAt, closesAt] =
+    selectedTime.value === 'all-day'
+      ? [null, null]
+      : selectedTime.value.split('|')
+
+  // Check for overlapping blocked schedules
+  const { data: existing, error: checkError } = await supabase
+    .from('office_schedules')
+    .select('id, opens_at, closes_at, is_closed')
+    .eq('office_id', officeId)
+    .eq('effective_date', selectedDate.value)
+
+  if (checkError) {
+    errorMessage.value = checkError.message
+    return
+  }
+
+  const alreadyBlocked = (existing || []).some(item => {
+
+    // All-day blocks conflict with every other block.
+    if (
+      selectedTime.value === 'all-day' ||
+      (!item.opens_at && !item.closes_at)
+    ) {
+      return true
+    }
+
+    // Check overlapping time ranges.
+    return (
+      opensAt < item.closes_at &&
+      closesAt > item.opens_at
+    )
+  })
 
   if (alreadyBlocked) {
-    window.alert('This date is already blocked.')
+    errorMessage.value =
+      'This date or time is already blocked or overlaps an existing block.'
     return
   }
 
@@ -257,40 +546,71 @@ async function blockDate() {
       .insert({
         office_id: officeId,
         day_of_week: null,
-        opens_at: null,
-        closes_at: null,
-        is_closed: true,
+        opens_at: opensAt,
+        closes_at: closesAt,
+        is_closed: selectedTime.value === 'all-day',
         effective_date: selectedDate.value,
-        note: 'Blocked Date'
+        note: reason.value.trim() || null
       })
 
     if (error) throw error
 
+    const blockedDate = formatDate(selectedDate.value)
+
+    const blockedTime = selectedTime.value === 'all-day'
+      ? 'All Day'
+      : `${formatTime(opensAt)} - ${formatTime(closesAt)}`
+
     selectedDate.value = ''
+    selectedTime.value = ''
+    reason.value = ''
 
     await fetchSchedules()
 
-    window.alert('Date successfully blocked.')
+    // Success popup is only for blocking a schedule.
+    showSuccessMessage(
+      'Schedule Blocked!',
+      `${blockedDate} (${blockedTime}) has been successfully blocked.`
+    )
+
   } catch (error) {
     console.error('Unable to block date:', error)
 
-    if (error.code === '23505') {
-      errorMessage.value = 'This date is already blocked.'
-    } else {
-      errorMessage.value = error.message || 'Unable to block date.'
-    }
+    errorMessage.value =
+      error.message || 'Unable to block date or time.'
+
   } finally {
     saving.value = false
   }
 }
 
-// DELETE BLOCKED DATE
-async function deleteBlockedDate(item) {
-  const confirmed = window.confirm(
-    `Are you sure you want to remove the blocked date ${item.label}?`
-  )
+/* =====================================
+   REMOVE BLOCKED DATE OR TIME
+===================================== */
 
-  if (!confirmed) return
+// Open custom confirmation modal
+function deleteBlockedDate(item) {
+  if (deletingId.value !== null) return
+
+  selectedBlockedDate.value = item
+  showDeleteConfirm.value = true
+}
+
+// Close confirmation modal
+function cancelDelete() {
+  if (deletingId.value !== null) return
+
+  showDeleteConfirm.value = false
+  selectedBlockedDate.value = null
+}
+
+// Confirm and delete from Supabase
+async function confirmDeleteBlockedDate() {
+  const item = selectedBlockedDate.value
+
+  if (!item || !officeId || deletingId.value !== null) {
+    return
+  }
 
   deletingId.value = item.id
   errorMessage.value = ''
@@ -304,16 +624,28 @@ async function deleteBlockedDate(item) {
 
     if (error) throw error
 
+    // Close confirmation modal after successful deletion.
+    showDeleteConfirm.value = false
+    selectedBlockedDate.value = null
+
+    // Refresh the list without showing another popup.
     await fetchSchedules()
+
   } catch (error) {
-    console.error('Unable to delete blocked date:', error)
-    errorMessage.value = error.message || 'Unable to delete blocked date.'
+    console.error('Unable to remove blocked schedule:', error)
+
+    errorMessage.value =
+      error.message || 'Unable to remove blocked schedule.'
+
   } finally {
     deletingId.value = null
   }
 }
 
-// REALTIME UPDATES
+/* =====================================
+   REALTIME UPDATES
+===================================== */
+
 function subscribeToSchedules() {
   if (!officeId) return
 
@@ -334,14 +666,21 @@ function subscribeToSchedules() {
     .subscribe()
 }
 
+/* =====================================
+   INITIALIZATION
+===================================== */
+
 onMounted(async () => {
   try {
     await getStaffOffice()
     await fetchSchedules()
     subscribeToSchedules()
+
   } catch (error) {
     console.error('Schedule initialization error:', error)
-    errorMessage.value = error.message || 'Unable to initialize schedule.'
+
+    errorMessage.value =
+      error.message || 'Unable to initialize schedule.'
   }
 })
 
@@ -351,218 +690,3 @@ onUnmounted(async () => {
   }
 })
 </script>
-
-<style scoped>
-.schedule-page {
-  min-height: 100%;
-  padding: 24px 16px;
-  box-sizing: border-box;
-  background: #efdfdf;
-  color: #350609;
-  font-family: Georgia, 'Times New Roman', serif;
-}
-
-.page-heading {
-  margin-bottom: 22px;
-}
-
-.page-heading h1 {
-  margin: 0 0 5px;
-  color: #59070d;
-  font-size: 19px;
-  font-weight: 700;
-}
-
-.page-heading p {
-  margin: 0;
-  color: #987e7e;
-  font-family: Arial, Helvetica, sans-serif;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.schedule-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
-  align-items: start;
-  gap: 20px;
-  width: 100%;
-}
-
-.schedule-card {
-  min-width: 0;
-  padding: 30px 50px;
-  border: 1px solid #c9babb;
-  border-radius: 12px;
-  background: #f8eeee;
-  box-sizing: border-box;
-}
-
-.schedule-card h2 {
-  margin: 0 0 14px;
-  color: #211314;
-  font-size: 20px;
-  font-weight: 700;
-}
-
-.office-hours-card {
-  min-height: 300px;
-}
-
-.office-hour-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 30px;
-  margin-bottom: 20px;
-  color: #211314;
-  font-family: Arial, Helvetica, sans-serif;
-  font-size: 16px;
-  font-weight: 500;
-}
-
-.office-hour-row:last-child {
-  margin-bottom: 0;
-}
-
-.office-hour-row strong {
-  font-size: 14px;
-  font-weight: 650;
-  white-space: nowrap;
-}
-
-/* BLOCK DATE FORM */
-.block-date-card form {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.block-date-card input[type='date'] {
-  width: 100%;
-  height: 60px;
-  padding: 5px 9px;
-  border: 1px solid #a86d72;
-  border-radius: 6px;
-  outline: none;
-  background: #f8eeee;
-  color: #350609;
-  font-family: Arial, Helvetica, sans-serif;
-  font-size: 13px;
-  box-sizing: border-box;
-}
-
-.block-date-card input[type='date']:focus {
-  border-color: #59070d;
-  box-shadow: 0 0 0 2px rgba(89, 7, 13, 0.1);
-}
-
-.block-button {
-  min-height: 31px;
-  padding: 7px 12px;
-  border: 1px solid #59070d;
-  border-radius: 6px;
-  background: #59070d;
-  color: #fff;
-  font-family: Arial, Helvetica, sans-serif;
-  font-size: 10px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.block-button:hover {
-  background: #760d16;
-}
-
-.block-button:disabled,
-.delete-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* BLOCKED DATES */
-.blocked-dates {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 10px;
-}
-
-.blocked-date-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  width: 100%;
-  min-height: 24px;
-  padding: 15px;
-  border-radius: 8px;
-  background: #f4dddd;
-  color: #350609;
-  font-family: Arial, Helvetica, sans-serif;
-  font-size: 10px;
-  box-sizing: border-box;
-}
-
-.blocked-date-item span {
-  overflow-wrap: anywhere;
-}
-
-.delete-button {
-  flex-shrink: 0;
-  padding: 6px 9px;
-  border: 1px solid #59070d;
-  border-radius: 5px;
-  background: transparent;
-  color: #59070d;
-  font-family: Arial, Helvetica, sans-serif;
-  font-size: 10px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.delete-button:hover {
-  background: #59070d;
-  color: #fff;
-}
-
-.empty-state,
-.status-message {
-  margin: 0;
-  color: #987e7e;
-  font-family: Arial, Helvetica, sans-serif;
-  font-size: 10px;
-}
-
-.error-message {
-  margin: 0 0 15px;
-  padding: 10px 12px;
-  border: 1px solid #d9a5a5;
-  border-radius: 6px;
-  background: #f8dddd;
-  color: #8a1010;
-  font-family: Arial, Helvetica, sans-serif;
-  font-size: 12px;
-}
-
-/* RESPONSIVE */
-@media (max-width: 600px) {
-  .schedule-page {
-    padding: 20px 12px;
-  }
-
-  .schedule-layout {
-    grid-template-columns: 1fr;
-    gap: 14px;
-  }
-
-  .schedule-card {
-    padding: 24px;
-  }
-
-  .office-hours-card {
-    min-height: auto;
-  }
-}
-</style>

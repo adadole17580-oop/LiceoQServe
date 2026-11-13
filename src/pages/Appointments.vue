@@ -1,17 +1,29 @@
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import {
+  ref,
+  computed,
+  onMounted,
+  onUnmounted
+} from 'vue'
+
 import { supabase } from '../lib/Supabase.js'
 
 const emit = defineEmits(['reschedule'])
 
-const NICO_STUDENT_ID = '2921235d-a3c7-4864-8dbc-b517081eec7d'
+// OSA SERVICE IDS
+const OSA_SERVICE_IDS = [
+  '5c2ab6fc-5f24-4573-896a-f5a11ad6625e',
+  '65a94572-bce2-460f-b3e8-2ed568ee7bbf',
+  'e5121b34-a6d2-4370-a023-5153a73c97f8'
+]
 
+// APPOINTMENT FILTERS
 const filters = [
   'All',
   'Pending',
   'Confirmed',
-  'Reschedule Requested',
+  'Ready for Pick Up',
   'Completed',
   'Cancelled',
   'No-Show'
@@ -28,11 +40,22 @@ const showModal = ref(false)
 const selectedAppointment = ref(null)
 const selectedAction = ref('')
 
+let appointmentSubscription = null
+let isFetching = false
+let refreshAgain = false
+let isMounted = false
+
+// MODAL CONTENT
 const modalContent = computed(() => {
   const content = {
     confirm: {
       title: 'Confirm this appointment?',
       button: 'Confirm appointment',
+      tone: 'maroon'
+    },
+    readyForPickup: {
+      title: 'Mark as Ready for Pick Up?',
+      button: 'Confirm Ready for Pick Up',
       tone: 'maroon'
     },
     completed: {
@@ -55,20 +78,24 @@ const modalContent = computed(() => {
   return content[selectedAction.value] || content.confirm
 })
 
+// FILTER APPOINTMENTS
 const filteredAppointments = computed(() => {
   if (selectedFilter.value === 'All') {
     return appointments.value
   }
 
   return appointments.value.filter(
-    appointment => appointment.displayStatus === selectedFilter.value
+    appointment =>
+      appointment.displayStatus === selectedFilter.value
   )
 })
 
+// FORMAT STATUS
 function formatStatus(status) {
   const statusMap = {
     pending: 'Pending',
     confirmed: 'Confirmed',
+    ready_for_pickup: 'Ready for Pick Up',
     reschedule_requested: 'Reschedule Requested',
     completed: 'Completed',
     cancelled: 'Cancelled',
@@ -79,6 +106,7 @@ function formatStatus(status) {
   return statusMap[status] || status
 }
 
+// FORMAT DATE
 function formatDate(date) {
   if (!date) return 'Date not set'
 
@@ -96,6 +124,7 @@ function formatDate(date) {
   }).format(parsedDate)
 }
 
+// FORMAT TIME
 function formatTime(time) {
   if (!time) return 'Time not set'
 
@@ -113,6 +142,7 @@ function formatTime(time) {
   }).format(parsedDate)
 }
 
+// STUDENT INFORMATION
 function getStudentName(appointment) {
   return appointment?.student?.full_name || 'Unknown Student'
 }
@@ -125,6 +155,7 @@ function getServiceName(appointment) {
   return appointment?.service?.name || 'Unknown Service'
 }
 
+// MAP APPOINTMENT DATA
 function mapAppointment(row) {
   return {
     ...row,
@@ -135,69 +166,90 @@ function mapAppointment(row) {
   }
 }
 
-// LOAD NICO DA APPOINTMENTS FROM SUPABASE
+// FETCH ALL OSA APPOINTMENTS
 async function loadAppointments() {
-  loading.value = true
-  errorMessage.value = ''
+  if (!isMounted) return
+
+  if (isFetching) {
+    refreshAgain = true
+    return
+  }
+
+  isFetching = true
 
   try {
-    const { data, error } = await supabase
-      .from('appointments')
-      .select(`
-        id,
-        student_id,
-        service_id,
-        scheduled_at,
-        end_at,
-        status,
-        purpose,
-        student_notes,
-        staff_notes,
-        handled_by,
-        reschedule_requested_at,
-        created_at,
-        updated_at,
-        student:profiles!appointments_student_id_fkey (
+    do {
+      refreshAgain = false
+
+      loading.value = appointments.value.length === 0
+      errorMessage.value = ''
+
+      const { data, error } = await supabase
+        .from('appointments')
+        .select(`
           id,
           student_id,
-          full_name,
-          university_email,
-          program,
-          year_level
-        ),
-        service:office_services!appointments_service_id_fkey (
-          id,
-          name,
-          description,
-          service_type,
-          office_id
-        )
-      `)
-      .eq('student_id', NICO_STUDENT_ID)
-      .order('scheduled_at', { ascending: true })
+          service_id,
+          scheduled_at,
+          end_at,
+          status,
+          purpose,
+          student_notes,
+          staff_notes,
+          handled_by,
+          reschedule_requested_at,
+          created_at,
+          updated_at,
+          student:profiles!appointments_student_id_fkey (
+            id,
+            student_id,
+            full_name,
+            university_email,
+            program,
+            year_level
+          ),
+          service:office_services!appointments_service_id_fkey (
+            id,
+            name,
+            description,
+            service_type,
+            office_id
+          )
+        `)
+        .in('service_id', OSA_SERVICE_IDS)
+        .order('scheduled_at', { ascending: true })
 
-    if (error) throw error
+      if (error) throw error
 
-    appointments.value = (data || []).map(mapAppointment)
+      appointments.value = (data || []).map(mapAppointment)
+
+      console.log(
+        'OSA APPOINTMENTS UPDATED:',
+        appointments.value
+      )
+
+    } while (refreshAgain && isMounted)
 
   } catch (error) {
-    console.error('Error loading Nico Da appointments:', error)
+    console.error('Error loading OSA appointments:', error)
 
     errorMessage.value =
       error.message || 'Unable to load appointments from Supabase.'
 
-    appointments.value = []
   } finally {
+    isFetching = false
     loading.value = false
   }
 }
 
+// OPEN ACTION MODAL
 function openModal(appointment, action) {
   selectedAppointment.value = appointment
   selectedAction.value = action
   showModal.value = true
 }
 
+// CLOSE ACTION MODAL
 function closeModal() {
   if (saving.value) return
 
@@ -206,12 +258,13 @@ function closeModal() {
   selectedAction.value = ''
 }
 
-// UPDATE APPOINTMENT STATUS IN SUPABASE
+// UPDATE APPOINTMENT STATUS
 async function confirmAction() {
   if (!selectedAppointment.value || saving.value) return
 
   const statusMap = {
     confirm: 'confirmed',
+    readyForPickup: 'ready_for_pickup',
     completed: 'completed',
     cancel: 'cancelled',
     noShow: 'no_show'
@@ -232,7 +285,7 @@ async function confirmAction() {
         updated_at: new Date().toISOString()
       })
       .eq('id', selectedAppointment.value.id)
-      .eq('student_id', NICO_STUDENT_ID)
+      .in('service_id', OSA_SERVICE_IDS)
       .select('id')
       .maybeSingle()
 
@@ -244,23 +297,30 @@ async function confirmAction() {
       )
     }
 
-    closeModal()
+    showModal.value = false
+    selectedAppointment.value = null
+    selectedAction.value = ''
 
     await loadAppointments()
 
   } catch (error) {
     console.error('Error updating appointment:', error)
 
-    window.alert(
+    errorMessage.value =
       error.message || 'Unable to update appointment. Please try again.'
-    )
+
   } finally {
     saving.value = false
   }
 }
 
-// SEND APPOINTMENT TO THE RESCHEDULE PAGE
+// SEND APPOINTMENT TO RESCHEDULE PAGE
 function rescheduleAppointment(appointment) {
+  if (!appointment?.id) {
+    console.error('Cannot reschedule appointment without an ID.')
+    return
+  }
+
   emit('reschedule', {
     ...appointment,
     date: appointment.scheduled_at,
@@ -272,14 +332,72 @@ function rescheduleAppointment(appointment) {
   })
 }
 
+// SUPABASE REALTIME SUBSCRIPTION
+function subscribeToAppointments() {
+  if (appointmentSubscription) return
+
+  appointmentSubscription = supabase
+    .channel('osa-appointments-realtime')
+
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'appointments'
+      },
+      (payload) => {
+        console.log(
+          'OSA appointment database change:',
+          payload.eventType
+        )
+
+        loadAppointments()
+      }
+    )
+
+    .subscribe((status, error) => {
+      console.log(
+        'OSA appointment realtime status:',
+        status
+      )
+
+      if (error) {
+        console.error(
+          'OSA appointment realtime error:',
+          error
+        )
+      }
+
+      if (status === 'SUBSCRIBED') {
+        loadAppointments()
+      }
+    })
+}
+
+// INITIALIZATION
 onMounted(() => {
+  isMounted = true
+
+  subscribeToAppointments()
   loadAppointments()
+})
+
+// CLEANUP
+onUnmounted(() => {
+  isMounted = false
+
+  if (appointmentSubscription) {
+    supabase.removeChannel(appointmentSubscription)
+    appointmentSubscription = null
+  }
 })
 </script>
 
 <template>
   <section class="appointments-page">
 
+    <!-- PAGE HEADING -->
     <header class="appointments-heading">
       <div>
         <h1>APPOINTMENTS</h1>
@@ -289,7 +407,9 @@ onMounted(() => {
       </div>
     </header>
 
+    <!-- APPOINTMENT FILTERS -->
     <nav class="appointment-filters">
+
       <button
         v-for="filter in filters"
         :key="filter"
@@ -309,8 +429,10 @@ onMounted(() => {
       >
         {{ loading ? 'Loading...' : 'Refresh' }}
       </button>
+
     </nav>
 
+    <!-- ERROR -->
     <div v-if="errorMessage" class="error-state">
       <p>{{ errorMessage }}</p>
 
@@ -323,10 +445,15 @@ onMounted(() => {
       </button>
     </div>
 
-    <div v-else-if="loading && appointments.length === 0" class="empty-state">
-      Loading Nico Da appointments from Supabase...
+    <!-- LOADING -->
+    <div
+      v-else-if="loading && appointments.length === 0"
+      class="empty-state"
+    >
+      Loading appointments from Supabase...
     </div>
 
+    <!-- APPOINTMENT LIST -->
     <div v-else class="appointment-list">
 
       <article
@@ -335,25 +462,54 @@ onMounted(() => {
         class="appointment-card"
       >
 
+        <!-- DATE AND TIME -->
         <div class="appointment-date">
-          <span>{{ formatDate(appointment.scheduled_at) }}</span>
-          <span>{{ formatTime(appointment.scheduled_at) }}</span>
+          <span>
+            {{ formatDate(appointment.scheduled_at) }}
+          </span>
+
+          <span>
+            {{ formatTime(appointment.scheduled_at) }}
+          </span>
         </div>
 
+        <!-- STUDENT AND SERVICE -->
         <h2 class="appointment-title">
-          {{ getStudentName(appointment) }} · {{ getServiceName(appointment) }}
+          {{ getStudentName(appointment) }} ·
+          {{ getServiceName(appointment) }}
         </h2>
 
-        <p class="appointment-reference">
-          {{ getStudentNumber(appointment) }} · {{ appointment.id }}
-        </p>
+        <!-- REFERENCE AND STATUS -->
+        <div class="appointment-reference-row">
 
-        <p v-if="appointment.purpose" class="appointment-purpose">
+          <p class="appointment-reference">
+            {{ getStudentNumber(appointment) }} ·
+            {{ appointment.id }}
+          </p>
+
+          <div class="appointment-status">
+            <span
+              class="status-badge"
+              :class="appointment.displayStatus.toLowerCase().replace(/[^a-z]+/g, '-')"
+            >
+              {{ appointment.displayStatus }}
+            </span>
+          </div>
+
+        </div>
+
+        <!-- PURPOSE -->
+        <p
+          v-if="appointment.purpose"
+          class="appointment-purpose"
+        >
           Purpose: {{ appointment.purpose }}
         </p>
 
+        <!-- ACTION BUTTONS -->
         <div class="appointment-actions">
 
+          <!-- 1. CONFIRM: ONLY DARK MAROON BUTTON -->
           <button
             v-if="appointment.status === 'pending'"
             type="button"
@@ -363,6 +519,7 @@ onMounted(() => {
             Confirm
           </button>
 
+          <!-- 2. RESCHEDULE -->
           <button
             v-if="['pending', 'confirmed'].includes(appointment.status)"
             type="button"
@@ -372,6 +529,7 @@ onMounted(() => {
             Reschedule
           </button>
 
+          <!-- 3. MARK COMPLETED -->
           <button
             v-if="['pending', 'confirmed'].includes(appointment.status)"
             type="button"
@@ -381,6 +539,17 @@ onMounted(() => {
             Mark Completed
           </button>
 
+          <!-- 4. READY FOR PICK UP: NORMAL BUTTON -->
+          <button
+            v-if="['pending', 'confirmed'].includes(appointment.status)"
+            type="button"
+            class="action-button"
+            @click="openModal(appointment, 'readyForPickup')"
+          >
+            Ready for Pick Up
+          </button>
+
+          <!-- 5. CANCEL -->
           <button
             v-if="['pending', 'confirmed'].includes(appointment.status)"
             type="button"
@@ -390,6 +559,7 @@ onMounted(() => {
             Cancel
           </button>
 
+          <!-- 6. NO SHOW -->
           <button
             v-if="['pending', 'confirmed'].includes(appointment.status)"
             type="button"
@@ -399,16 +569,11 @@ onMounted(() => {
             No-Show
           </button>
 
-          <span
-            class="status-badge"
-            :class="appointment.displayStatus.toLowerCase().replace(/[^a-z]+/g, '-')"
-          >
-            {{ appointment.displayStatus }}
-          </span>
-
         </div>
+
       </article>
 
+      <!-- EMPTY -->
       <div
         v-if="filteredAppointments.length === 0"
         class="empty-state"
@@ -418,6 +583,7 @@ onMounted(() => {
 
     </div>
 
+    <!-- ACTION MODAL -->
     <Teleport to="body">
       <div
         v-if="showModal && selectedAppointment"
@@ -425,6 +591,7 @@ onMounted(() => {
         @click.self="closeModal"
         @keydown.esc="closeModal"
       >
+
         <section
           class="action-modal"
           role="dialog"
@@ -433,11 +600,13 @@ onMounted(() => {
         >
 
           <div class="modal-heading">
+
             <div class="warning-icon" aria-hidden="true">
               <span>!</span>
             </div>
 
             <h2>{{ modalContent.title }}</h2>
+
           </div>
 
           <p class="modal-description">
@@ -448,6 +617,7 @@ onMounted(() => {
           </p>
 
           <div class="modal-actions">
+
             <button
               type="button"
               class="modal-button modal-back-button"
@@ -466,9 +636,11 @@ onMounted(() => {
             >
               {{ saving ? 'Saving...' : modalContent.button }}
             </button>
+
           </div>
 
         </section>
+
       </div>
     </Teleport>
 
@@ -482,6 +654,7 @@ onMounted(() => {
   color: #35080b;
 }
 
+/* PAGE HEADING */
 .appointments-heading {
   display: flex;
   align-items: center;
@@ -506,24 +679,45 @@ onMounted(() => {
   line-height: 1.5;
 }
 
+/* FILTERS */
+.appointment-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 0 28px 12px;
+}
+
+.filter-button,
 .refresh-button,
 .retry-button {
   padding: 8px 13px;
   border: 1px solid #7a252b;
   border-radius: 20px;
   background: transparent;
-  color: #59080e;
+  color: #39090d;
   font-family: Arial, sans-serif;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
 }
 
+.filter-button {
+  min-height: 33px;
+  padding: 7px 14px;
+  white-space: nowrap;
+}
+
+.filter-button:hover,
+.filter-button.active {
+  background: #59080e;
+  color: #ffffff;
+}
+
 .refresh-button {
   min-height: 33px;
   margin-left: auto;
   padding: 7px 14px;
-  border-radius: 22px;
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -539,34 +733,7 @@ onMounted(() => {
   cursor: not-allowed;
 }
 
-.appointment-filters {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin: 0 28px 12px;
-}
-
-.filter-button {
-  min-height: 33px;
-  padding: 7px 14px;
-  border: 1px solid #7a252b;
-  border-radius: 22px;
-  background: transparent;
-  color: #39090d;
-  font-family: Arial, sans-serif;
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.filter-button:hover,
-.filter-button.active {
-  background: #59080e;
-  color: #ffffff;
-}
-
+/* APPOINTMENT LIST */
 .appointment-list {
   display: flex;
   flex-direction: column;
@@ -584,6 +751,7 @@ onMounted(() => {
   background: #f8eeee;
 }
 
+/* DATE AND TIME */
 .appointment-date {
   display: flex;
   flex-wrap: wrap;
@@ -595,22 +763,83 @@ onMounted(() => {
   text-transform: uppercase;
 }
 
+/* STUDENT AND SERVICE */
 .appointment-title {
-  margin: 0 0 5px;
+  margin: 0 0 8px;
   color: #321014;
   font-family: Georgia, 'Times New Roman', serif;
   font-size: 12px;
   font-weight: 700;
 }
 
+/* REFERENCE AND STATUS ALIGNMENT */
+.appointment-reference-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
 .appointment-reference {
+  flex: 1;
+  min-width: 0;
   margin: 0;
   color: #a18485;
   font-family: Arial, sans-serif;
   font-size: 10px;
+  line-height: 1.5;
   overflow-wrap: anywhere;
 }
 
+/* STATUS BADGE */
+.appointment-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 11px;
+  border-radius: 12px;
+  background: #ead5d6;
+  color: #59080e;
+  font-family: Arial, sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.status-badge.pending {
+  background: #f5df80;
+  color: #765500;
+}
+
+.status-badge.confirmed,
+.status-badge.completed,
+.status-badge.ready-for-pick-up {
+  background: #d8ead9;
+  color: #285b31;
+}
+
+.status-badge.cancelled,
+.status-badge.no-show,
+.status-badge.rejected {
+  background: #f3dada;
+  color: #a20f19;
+}
+
+.status-badge.reschedule-requested {
+  background: #f7e8c8;
+  color: #805515;
+}
+
+/* PURPOSE */
 .appointment-purpose {
   margin: 9px 0 0;
   color: #76595b;
@@ -619,6 +848,7 @@ onMounted(() => {
   overflow-wrap: anywhere;
 }
 
+/* ACTION BUTTONS */
 .appointment-actions {
   display: flex;
   align-items: center;
@@ -654,36 +884,7 @@ onMounted(() => {
   color: #ffffff;
 }
 
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 8px;
-  border-radius: 12px;
-  background: #ead5d6;
-  color: #59080e;
-  font-family: Arial, sans-serif;
-  font-size: 9px;
-  font-weight: 700;
-}
-
-.status-badge.confirmed,
-.status-badge.completed {
-  background: #d8ead9;
-  color: #285b31;
-}
-
-.status-badge.cancelled,
-.status-badge.no-show,
-.status-badge.rejected {
-  background: #f3dada;
-  color: #a20f19;
-}
-
-.status-badge.reschedule-requested {
-  background: #f7e8c8;
-  color: #805515;
-}
-
+/* EMPTY AND ERROR */
 .empty-state,
 .error-state {
   width: 100%;
@@ -707,6 +908,7 @@ onMounted(() => {
   overflow-wrap: anywhere;
 }
 
+/* ACTION MODAL */
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -835,6 +1037,7 @@ onMounted(() => {
   background: #b90000;
 }
 
+/* RESPONSIVE */
 @media (max-width: 700px) {
   .appointments-heading {
     margin: 15px 0 22px;
@@ -870,6 +1073,19 @@ onMounted(() => {
   .filter-button {
     padding: 7px 10px;
     font-size: 11px;
+  }
+
+  .appointment-reference-row {
+    gap: 7px;
+  }
+
+  .appointment-reference {
+    font-size: 9px;
+  }
+
+  .status-badge {
+    padding: 5px 8px;
+    font-size: 8px;
   }
 
   .action-modal {

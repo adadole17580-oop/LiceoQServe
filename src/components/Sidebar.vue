@@ -38,7 +38,7 @@ const menuItems = [
     <div class="sidebar-footer">
       <div class="office-status">
         <strong>Office status</strong>
-        <span>Open · 8:00 AM–5:00 PM</span>
+        <span>Open · 9:00 AM–5:00 PM</span>
       </div>
 
       <button

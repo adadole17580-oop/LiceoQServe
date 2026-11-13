@@ -6,6 +6,10 @@ const props = defineProps({
   appointment: {
     type: Object,
     default: null
+  },
+  saving: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -18,14 +22,15 @@ const showReview = ref(false)
 const pendingSchedule = ref(null)
 
 const timeOptions = [
-  { label: '08:00 AM', value: '08:00' },
   { label: '09:00 AM', value: '09:00' },
   { label: '10:00 AM', value: '10:00' },
   { label: '11:00 AM', value: '11:00' },
+  { label: '12:00 PM', value: '12:00' },
   { label: '01:00 PM', value: '13:00' },
   { label: '02:00 PM', value: '14:00' },
   { label: '03:00 PM', value: '15:00' },
-  { label: '04:00 PM', value: '16:00' }
+  { label: '04:00 PM', value: '16:00' },
+  { label: '05:00 PM', value: '17:00' }
 ]
 
 const studentName = computed(() => {
@@ -34,11 +39,13 @@ const studentName = computed(() => {
     'Student'
 })
 
+// FORMAT DATE
 function formatDate(date) {
   if (!date) return 'Not set'
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     const [year, month, day] = date.split('-')
+
     const months = [
       'Jan.', 'Feb.', 'Mar.', 'Apr.', 'May', 'Jun.',
       'Jul.', 'Aug.', 'Sep.', 'Oct.', 'Nov.', 'Dec.'
@@ -47,9 +54,21 @@ function formatDate(date) {
     return `${months[Number(month) - 1]} ${Number(day)}, ${year}`
   }
 
-  return date
+  const parsedDate = new Date(date)
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return 'Not set'
+  }
+
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'Asia/Manila'
+  }).format(parsedDate)
 }
 
+// FORMAT TIME
 function formatTime(time) {
   if (!time) return 'Not set'
 
@@ -60,18 +79,37 @@ function formatTime(time) {
     return `${hour % 12 || 12}:${minutes} ${hour >= 12 ? 'PM' : 'AM'}`
   }
 
-  return time
+  const parsedDate = new Date(time)
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return 'Not set'
+  }
+
+  return new Intl.DateTimeFormat('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: 'Asia/Manila'
+  }).format(parsedDate)
 }
 
+// GET TODAY'S DATE IN PHILIPPINE TIME
 function todayString() {
-  const date = new Date()
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(new Date())
+
+  const year = parts.find(part => part.type === 'year').value
+  const month = parts.find(part => part.type === 'month').value
+  const day = parts.find(part => part.type === 'day').value
 
   return `${year}-${month}-${day}`
 }
 
+// RESET FORM
 function resetForm() {
   newDate.value = ''
   newTime.value = ''
@@ -80,6 +118,7 @@ function resetForm() {
   pendingSchedule.value = null
 }
 
+// RESET WHEN APPOINTMENT CHANGES
 watch(
   () => props.appointment?.id,
   () => {
@@ -88,6 +127,7 @@ watch(
   { immediate: true }
 )
 
+// REVIEW NEW SCHEDULE
 function reviewSchedule() {
   errorMessage.value = ''
 
@@ -115,19 +155,26 @@ function reviewSchedule() {
   showReview.value = true
 }
 
+// CONFIRM RESCHEDULE
 function confirmSchedule() {
-  if (!pendingSchedule.value) return
+  if (!pendingSchedule.value || props.saving) return
 
   emit('save', pendingSchedule.value)
 }
 
+// RETURN TO FORM
 function cancelReview() {
+  if (props.saving) return
+
   showReview.value = false
   pendingSchedule.value = null
   errorMessage.value = ''
 }
 
+// CANCEL EDITING
 function cancelEditing() {
+  if (props.saving) return
+
   resetForm()
   emit('cancel')
 }
@@ -135,34 +182,57 @@ function cancelEditing() {
 
 <template>
   <section class="reschedule-page">
+
+    <!-- PAGE HEADING -->
     <header class="page-heading">
       <h1>Reschedule Appointment</h1>
+
       <p>
         {{ studentName }} ·
         {{ appointment?.id || 'Appointment' }}
       </p>
     </header>
 
+    <!-- APPOINTMENT FORM -->
     <div v-if="appointment" class="reschedule-card">
+
+      <!-- CURRENT SCHEDULE -->
       <div class="current-schedule">
-        <strong>Current: {{ formatDate(appointment.date) }} at {{ formatTime(appointment.time) }}</strong>
+        <strong>
+          Current:
+          {{ formatDate(appointment.scheduled_at || appointment.date) }}
+          at
+          {{ formatTime(appointment.scheduled_at || appointment.time) }}
+        </strong>
       </div>
 
+      <!-- NEW SCHEDULE FORM -->
       <template v-if="!showReview">
+
         <div class="field-group">
           <label for="new-date">New date</label>
+
           <input
             id="new-date"
             v-model="newDate"
             type="date"
             :min="todayString()"
+            :disabled="saving"
           />
         </div>
 
         <div class="field-group">
           <label for="new-time">New time</label>
-          <select id="new-time" v-model="newTime">
-            <option value="" disabled>Choose time</option>
+
+          <select
+            id="new-time"
+            v-model="newTime"
+            :disabled="saving"
+          >
+            <option value="" disabled>
+              Choose time
+            </option>
+
             <option
               v-for="option in timeOptions"
               :key="option.value"
@@ -178,9 +248,11 @@ function cancelEditing() {
         </p>
 
         <div class="form-actions">
+
           <button
             type="button"
             class="review-button"
+            :disabled="saving"
             @click="reviewSchedule"
           >
             Review schedule
@@ -189,52 +261,76 @@ function cancelEditing() {
           <button
             type="button"
             class="cancel-button"
+            :disabled="saving"
             @click="cancelEditing"
           >
             Cancel editing
           </button>
+
         </div>
       </template>
 
+      <!-- REVIEW SCHEDULE -->
       <template v-else>
-        <h2 class="review-title">Review new schedule</h2>
+
+        <h2 class="review-title">
+          Review new schedule
+        </h2>
 
         <div class="review-row">
           <span>New date</span>
-          <strong>{{ formatDate(pendingSchedule.date) }}</strong>
+
+          <strong>
+            {{ formatDate(pendingSchedule.date) }}
+          </strong>
         </div>
 
         <div class="review-row">
           <span>New time</span>
-          <strong>{{ formatTime(pendingSchedule.time) }}</strong>
+
+          <strong>
+            {{ formatTime(pendingSchedule.time) }}
+          </strong>
         </div>
 
         <p class="review-note">
           Are you sure you want to update this appointment?
         </p>
 
+        <p v-if="errorMessage" class="error-message">
+          {{ errorMessage }}
+        </p>
+
         <div class="form-actions">
+
           <button
             type="button"
             class="review-button"
+            :disabled="saving"
             @click="confirmSchedule"
           >
-            Confirm reschedule
+            {{ saving ? 'Saving...' : 'Confirm reschedule' }}
           </button>
 
           <button
             type="button"
             class="cancel-button"
+            :disabled="saving"
             @click="cancelReview"
           >
             Go back
           </button>
+
         </div>
       </template>
     </div>
 
+    <!-- NO APPOINTMENT SELECTED -->
     <div v-else class="reschedule-card">
-      <p class="error-message">No appointment was selected.</p>
+
+      <p class="error-message">
+        No appointment was selected.
+      </p>
 
       <button
         type="button"
@@ -243,7 +339,9 @@ function cancelEditing() {
       >
         Back to appointments
       </button>
+
     </div>
+
   </section>
 </template>
 
@@ -273,6 +371,7 @@ function cancelEditing() {
   margin: 0;
   color: #a18b8c;
   font: 600 13px Arial, sans-serif;
+  overflow-wrap: anywhere;
 }
 
 .reschedule-card {
@@ -294,6 +393,7 @@ function cancelEditing() {
   color: #59080e;
   font-size: 10px;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .current-schedule strong {
@@ -334,6 +434,12 @@ function cancelEditing() {
   border-color: #59080e;
 }
 
+.field-group input:disabled,
+.field-group select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .form-actions {
   display: flex;
   flex-wrap: wrap;
@@ -371,10 +477,17 @@ function cancelEditing() {
   background: #f1e0e1;
 }
 
+.review-button:disabled,
+.cancel-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .error-message {
   margin: 0 0 12px;
   color: #a51f2a;
   font: 11px Arial, sans-serif;
+  line-height: 1.5;
 }
 
 .review-title {
@@ -396,9 +509,14 @@ function cancelEditing() {
   color: #927a7b;
 }
 
+.review-row strong {
+  text-align: right;
+}
+
 .review-note {
   color: #927a7b;
   font: 11px Arial, sans-serif;
+  line-height: 1.5;
 }
 
 @media (max-width: 600px) {
