@@ -132,7 +132,6 @@ const errorMessage = ref('')
 
 let historyChannel = null
 
-// Format database date
 function formatDate(dateValue) {
   if (!dateValue) return 'Date not available'
 
@@ -151,20 +150,17 @@ function formatDate(dateValue) {
   })
 }
 
-// Get student and staff names
 function getProfileName(profile) {
   if (!profile) return 'Not recorded'
 
   return profile.full_name || 'Not recorded'
 }
 
-// Fetch history records
 async function fetchHistory() {
   isLoading.value = true
   errorMessage.value = ''
 
   try {
-    // 1. Get currently authenticated user
     const {
       data: { user },
       error: authError
@@ -176,7 +172,6 @@ async function fetchHistory() {
       throw new Error('Please log in to view history records.')
     }
 
-    // 2. Get current staff profile and office
     const { data: staffProfile, error: profileError } =
       await supabase
         .from('profiles')
@@ -190,7 +185,6 @@ async function fetchHistory() {
       throw new Error('Your account is not assigned to an office.')
     }
 
-    // 3. Get history records
     const { data: historyData, error: historyError } =
       await supabase
         .from('service_history')
@@ -214,7 +208,6 @@ async function fetchHistory() {
       return
     }
 
-    // 4. Get services assigned to the current staff office
     const { data: officeServices, error: servicesError } =
       await supabase
         .from('office_services')
@@ -230,7 +223,6 @@ async function fetchHistory() {
       ])
     )
 
-    // Only display history belonging to the current office
     const officeHistory = historyData.filter(item =>
       serviceMap.has(item.service_id)
     )
@@ -240,7 +232,6 @@ async function fetchHistory() {
       return
     }
 
-    // 5. Collect student IDs and transaction IDs
     const studentIds = [
       ...new Set(
         officeHistory
@@ -295,7 +286,6 @@ async function fetchHistory() {
     if (requestsResult.error) throw requestsResult.error
     if (appointmentsResult.error) throw appointmentsResult.error
 
-    // 7. Create lookup maps
     const studentMap = new Map(
       (studentsResult.data || []).map(student => [
         student.id,
@@ -317,7 +307,6 @@ async function fetchHistory() {
       ])
     )
 
-    // 8. Get staff IDs who handled transactions
     const handlerIds = [
       ...new Set([
         ...(requestsResult.data || []).map(item => item.handled_by),
@@ -344,7 +333,6 @@ async function fetchHistory() {
       )
     }
 
-    // 9. Format records for the History UI
     historyItems.value = officeHistory.map(item => {
       const transactionType =
         String(item.transaction_type).toLowerCase()
@@ -387,13 +375,12 @@ async function fetchHistory() {
           ? `${student.full_name || 'Unknown Student'}${
               student.student_id
                 ? ` (${student.student_id})`
-                : ''
+               : ''
             }`
           : 'Not available',
 
         transactionId: item.transaction_id || 'Not available',
 
-        // No previous-status field exists in the confirmed schema.
         previousStatus: 'Not recorded',
 
         newStatus: item.final_status || 'Not recorded',
@@ -436,7 +423,6 @@ onMounted(() => {
 
   window.addEventListener('keydown', handleKeydown)
 
-  // Listen for new history records
   historyChannel = supabase
     .channel('osa-history-changes')
     .on(
@@ -463,8 +449,8 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* HISTORY PAGE */
-.main-content {
+
+  .main-content {
   flex: 1;
   min-width: 0;
   padding: 20px 22px;
@@ -493,7 +479,6 @@ onUnmounted(() => {
   font-weight: 600;
 }
 
-/* HISTORY RECORDS */
 .history-card {
   width: 100%;
   overflow: hidden;
@@ -563,7 +548,6 @@ onUnmounted(() => {
   color: #a32632;
 }
 
-/* MODAL OVERLAY */
 .history-overlay {
   position: fixed;
   inset: 0;
@@ -576,7 +560,6 @@ onUnmounted(() => {
   background: rgba(35, 24, 25, 0.40);
 }
 
-/* MODAL BOX */
 .history-modal {
   position: relative;
   width: 352px;
@@ -591,7 +574,6 @@ onUnmounted(() => {
   box-shadow: 0 8px 25px rgba(0, 0, 0, 0.06);
 }
 
-/* MODAL HEADER */
 .history-modal .modal-header {
   position: static;
   display: flex;
@@ -636,7 +618,6 @@ onUnmounted(() => {
   color: #59070d;
 }
 
-/* SELECTED RECORD TITLE */
 .modal-title-section h2 {
   margin: 0;
   color: #59070d;
@@ -655,7 +636,6 @@ onUnmounted(() => {
   line-height: 1.4;
 }
 
-/* AUDIT INFORMATION */
 .audit-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -685,7 +665,6 @@ onUnmounted(() => {
   overflow-wrap: anywhere;
 }
 
-/* NOTES */
 .audit-notes {
   display: flex;
   align-items: center;
@@ -705,14 +684,12 @@ onUnmounted(() => {
   line-height: 1.4;
 }
 
-/* ACCESSIBILITY */
 .view-details:focus-visible,
 .history-modal .modal-close:focus-visible {
   outline: 2px solid #9c555c;
   outline-offset: 3px;
 }
 
-/* RESPONSIVE */
 @media (max-width: 480px) {
   .main-content {
     padding: 18px 10px;
