@@ -11,7 +11,6 @@ import { supabase } from '../lib/Supabase.js'
 
 const emit = defineEmits(['reschedule'])
 
-// OSA SERVICE IDS
 const OSA_SERVICE_IDS = [
   '5c2ab6fc-5f24-4573-896a-f5a11ad6625e',
   '65a94572-bce2-460f-b3e8-2ed568ee7bbf',
@@ -77,7 +76,6 @@ const modalContent = computed(() => {
   return content[selectedAction.value] || content.confirm
 })
 
-// FILTER APPOINTMENTS
 const filteredAppointments = computed(() => {
   if (selectedFilter.value === 'All') {
     return appointments.value
@@ -89,7 +87,6 @@ const filteredAppointments = computed(() => {
   )
 })
 
-// FORMAT STATUS
 function formatStatus(status) {
   const statusMap = {
     pending: 'Pending',
@@ -105,7 +102,7 @@ function formatStatus(status) {
   return statusMap[status] || status
 }
 
-// FORMAT DATE
+
 function formatDate(date) {
   if (!date) return 'Date not set'
 
@@ -122,8 +119,7 @@ function formatDate(date) {
     timeZone: 'Asia/Manila'
   }).format(parsedDate)
 }
-
-// FORMAT TIME
+  
 function formatTime(time) {
   if (!time) return 'Time not set'
 
@@ -141,7 +137,6 @@ function formatTime(time) {
   }).format(parsedDate)
 }
 
-// STUDENT INFORMATION
 function getStudentName(appointment) {
   return appointment?.student?.full_name || 'Unknown Student'
 }
@@ -154,7 +149,7 @@ function getServiceName(appointment) {
   return appointment?.service?.name || 'Unknown Service'
 }
 
-// MAP APPOINTMENT DATA
+
 function mapAppointment(row) {
   return {
     ...row,
@@ -165,7 +160,7 @@ function mapAppointment(row) {
   }
 }
 
-// FETCH ALL OSA APPOINTMENTS
+
 async function loadAppointments() {
   if (!isMounted) return
 
@@ -248,7 +243,6 @@ function openModal(appointment, action) {
   showModal.value = true
 }
 
-// CLOSE ACTION MODAL
 function closeModal() {
   if (saving.value) return
 
@@ -257,7 +251,6 @@ function closeModal() {
   selectedAction.value = ''
 }
 
-// UPDATE APPOINTMENT STATUS
 async function confirmAction() {
   if (!selectedAppointment.value || saving.value) return
 
@@ -313,7 +306,6 @@ async function confirmAction() {
   }
 }
 
-// SEND APPOINTMENT TO RESCHEDULE PAGE
 function rescheduleAppointment(appointment) {
   if (!appointment?.id) {
     console.error('Cannot reschedule appointment without an ID.')
@@ -331,7 +323,6 @@ function rescheduleAppointment(appointment) {
   })
 }
 
-// SUPABASE REALTIME SUBSCRIPTION
 function subscribeToAppointments() {
   if (appointmentSubscription) return
 
@@ -374,7 +365,6 @@ function subscribeToAppointments() {
     })
 }
 
-// INITIALIZATION
 onMounted(() => {
   isMounted = true
 
@@ -382,7 +372,6 @@ onMounted(() => {
   loadAppointments()
 })
 
-// CLEANUP
 onUnmounted(() => {
   isMounted = false
 
@@ -396,7 +385,6 @@ onUnmounted(() => {
 <template>
   <section class="appointments-page">
 
-    <!-- PAGE HEADING -->
     <header class="appointments-heading">
       <div>
         <h1>APPOINTMENTS</h1>
@@ -406,7 +394,7 @@ onUnmounted(() => {
       </div>
     </header>
 
-    <!-- APPOINTMENT FILTERS -->
+    
     <nav class="appointment-filters">
 
       <button
@@ -431,7 +419,6 @@ onUnmounted(() => {
 
     </nav>
 
-    <!-- ERROR -->
     <div v-if="errorMessage" class="error-state">
       <p>{{ errorMessage }}</p>
 
@@ -443,16 +430,14 @@ onUnmounted(() => {
         Try Again
       </button>
     </div>
-
-    <!-- LOADING -->
+    
     <div
       v-else-if="loading && appointments.length === 0"
       class="empty-state"
     >
       Loading appointments from Supabase...
     </div>
-
-    <!-- APPOINTMENT LIST -->
+    
     <div v-else class="appointment-list">
 
       <article
@@ -460,8 +445,6 @@ onUnmounted(() => {
         :key="appointment.id"
         class="appointment-card"
       >
-
-        <!-- DATE AND TIME -->
         <div class="appointment-date">
           <span>
             {{ formatDate(appointment.scheduled_at) }}
@@ -472,13 +455,11 @@ onUnmounted(() => {
           </span>
         </div>
 
-        <!-- STUDENT AND SERVICE -->
         <h2 class="appointment-title">
           {{ getStudentName(appointment) }} ·
           {{ getServiceName(appointment) }}
         </h2>
 
-        <!-- REFERENCE AND STATUS -->
         <div class="appointment-reference-row">
 
           <p class="appointment-reference">
@@ -497,7 +478,6 @@ onUnmounted(() => {
 
         </div>
 
-        <!-- PURPOSE -->
         <p
           v-if="appointment.purpose"
           class="appointment-purpose"
@@ -505,7 +485,6 @@ onUnmounted(() => {
           Purpose: {{ appointment.purpose }}
         </p>
 
-        <!-- ACTION BUTTONS -->
         <div class="appointment-actions">
 
           <!-- 1. CONFIRM: ONLY DARK MAROON BUTTON -->
@@ -517,8 +496,7 @@ onUnmounted(() => {
           >
             Confirm
           </button>
-
-          <!-- 2. RESCHEDULE -->
+          
           <button
             v-if="['pending', 'confirmed'].includes(appointment.status)"
             type="button"
@@ -528,7 +506,6 @@ onUnmounted(() => {
             Reschedule
           </button>
 
-          <!-- 3. MARK COMPLETED -->
           <button
             v-if="['pending', 'confirmed'].includes(appointment.status)"
             type="button"
@@ -538,7 +515,6 @@ onUnmounted(() => {
             Mark Completed
           </button>
 
-          <!-- 4. READY FOR PICK UP: NORMAL BUTTON -->
           <button
             v-if="['pending', 'confirmed'].includes(appointment.status)"
             type="button"
@@ -548,7 +524,6 @@ onUnmounted(() => {
             Ready for Pick Up
           </button>
 
-          <!-- 5. CANCEL -->
           <button
             v-if="['pending', 'confirmed'].includes(appointment.status)"
             type="button"
@@ -558,7 +533,6 @@ onUnmounted(() => {
             Cancel
           </button>
 
-          <!-- 6. NO SHOW -->
           <button
             v-if="['pending', 'confirmed'].includes(appointment.status)"
             type="button"
@@ -572,7 +546,6 @@ onUnmounted(() => {
 
       </article>
 
-      <!-- EMPTY -->
       <div
         v-if="filteredAppointments.length === 0"
         class="empty-state"
@@ -582,7 +555,6 @@ onUnmounted(() => {
 
     </div>
 
-    <!-- ACTION MODAL -->
     <Teleport to="body">
       <div
         v-if="showModal && selectedAppointment"
@@ -652,8 +624,7 @@ onUnmounted(() => {
   min-height: 100%;
   color: #35080b;
 }
-
-/* PAGE HEADING */
+  
 .appointments-heading {
   display: flex;
   align-items: center;
@@ -678,7 +649,6 @@ onUnmounted(() => {
   line-height: 1.5;
 }
 
-/* FILTERS */
 .appointment-filters {
   display: flex;
   align-items: center;
@@ -732,7 +702,6 @@ onUnmounted(() => {
   cursor: not-allowed;
 }
 
-/* APPOINTMENT LIST */
 .appointment-list {
   display: flex;
   flex-direction: column;
@@ -750,7 +719,6 @@ onUnmounted(() => {
   background: #f8eeee;
 }
 
-/* DATE AND TIME */
 .appointment-date {
   display: flex;
   flex-wrap: wrap;
@@ -761,8 +729,7 @@ onUnmounted(() => {
   font-size: 10px;
   text-transform: uppercase;
 }
-
-/* STUDENT AND SERVICE */
+  
 .appointment-title {
   margin: 0 0 8px;
   color: #321014;
@@ -771,7 +738,6 @@ onUnmounted(() => {
   font-weight: 700;
 }
 
-/* REFERENCE AND STATUS ALIGNMENT */
 .appointment-reference-row {
   display: flex;
   align-items: center;
@@ -791,7 +757,6 @@ onUnmounted(() => {
   overflow-wrap: anywhere;
 }
 
-/* STATUS BADGE */
 .appointment-status {
   display: flex;
   align-items: center;
@@ -838,7 +803,6 @@ onUnmounted(() => {
   color: #805515;
 }
 
-/* PURPOSE */
 .appointment-purpose {
   margin: 9px 0 0;
   color: #76595b;
@@ -846,8 +810,6 @@ onUnmounted(() => {
   font-size: 11px;
   overflow-wrap: anywhere;
 }
-
-/* ACTION BUTTONS */
 .appointment-actions {
   display: flex;
   align-items: center;
@@ -882,8 +844,7 @@ onUnmounted(() => {
   background: #760d15;
   color: #ffffff;
 }
-
-/* EMPTY AND ERROR */
+  
 .empty-state,
 .error-state {
   width: 100%;
@@ -906,8 +867,7 @@ onUnmounted(() => {
 .error-state p {
   overflow-wrap: anywhere;
 }
-
-/* ACTION MODAL */
+  
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -1035,8 +995,7 @@ onUnmounted(() => {
 .modal-confirm-button.tone-red:hover {
   background: #b90000;
 }
-
-/* RESPONSIVE */
+  
 @media (max-width: 700px) {
   .appointments-heading {
     margin: 15px 0 22px;
