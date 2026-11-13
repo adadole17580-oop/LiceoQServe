@@ -23,7 +23,6 @@ const filters = [
   'All',
   'Pending',
   'Confirmed',
-  'Ready for Pick Up',
   'Completed',
   'Cancelled',
   'No-Show'
