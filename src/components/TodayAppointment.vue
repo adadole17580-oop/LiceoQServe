@@ -19,14 +19,23 @@ const errorMessage = ref('')
 let realtimeChannel = null
 let refreshTimeout = null
 
-// GET TODAY'S DATE IN PHILIPPINE TIME
-function getTodayDate() {
-  return new Intl.DateTimeFormat('en-CA', {
+const excludedStatuses = [
+  'cancelled',
+  'rejected',
+  'completed',
+  'no_show'
+]
+
+// FORMAT DATE
+function formatDate(value) {
+  if (!value) return 'Date unavailable'
+
+  return new Date(value).toLocaleDateString('en-PH', {
     timeZone: 'Asia/Manila',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).format(new Date())
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  })
 }
 
 // FORMAT TIME
@@ -55,14 +64,16 @@ function formatStatus(value) {
   return statuses[String(value || '').toLowerCase()] || value || 'Pending'
 }
 
-// FETCH TODAY'S APPOINTMENTS
-async function fetchTodayAppointments() {
+// FETCH UPCOMING APPOINTMENTS
+async function fetchUpcomingAppointments() {
   if (loading.value) return
 
   loading.value = true
   errorMessage.value = ''
 
   try {
+    const now = new Date().toISOString()
+
     const { data: records, error } = await supabase
       .from('appointments')
       .select(`
@@ -74,30 +85,21 @@ async function fetchTodayAppointments() {
         purpose
       `)
       .in('service_id', LIBRARY_SERVICE_IDS)
+      .gte('scheduled_at', now)
       .order('scheduled_at', { ascending: true })
 
     if (error) throw error
 
-    const today = getTodayDate()
-
-    // FILTER APPOINTMENTS SCHEDULED TODAY
-    const todayRecords = (records || []).filter(item => {
-      if (!item.scheduled_at) return false
-
-      const appointmentDate = new Intl.DateTimeFormat('en-CA', {
-        timeZone: 'Asia/Manila',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit'
-      }).format(new Date(item.scheduled_at))
-
-      return appointmentDate === today
+    // EXCLUDE CANCELLED, REJECTED, COMPLETED AND NO-SHOW
+    const upcomingRecords = (records || []).filter(item => {
+      const status = String(item.status || '').toLowerCase()
+      return !excludedStatuses.includes(status)
     })
 
     // GET STUDENT IDS
     const studentIds = [
       ...new Set(
-        todayRecords
+        upcomingRecords
           .map(item => item.student_id)
           .filter(Boolean)
       )
@@ -124,17 +126,18 @@ async function fetchTodayAppointments() {
       ])
     )
 
-    // DISPLAY APPOINTMENTS
-    appointments.value = todayRecords.map(item => ({
+    // DISPLAY UPCOMING APPOINTMENTS
+    appointments.value = upcomingRecords.map(item => ({
       id: item.id,
-      name: profileMap.get(item.student_id) || 'Student',
+      name: profileMap.get(item.student_id) || 'Unknown Student',
       activity: item.purpose || 'Library Appointment',
+      date: formatDate(item.scheduled_at),
       time: formatTime(item.scheduled_at),
       status: formatStatus(item.status)
     }))
 
   } catch (error) {
-    console.error('Today appointments error:', error)
+    console.error('Upcoming appointments error:', error)
     errorMessage.value = error.message || 'Unable to load appointments.'
   } finally {
     loading.value = false
@@ -146,14 +149,14 @@ function scheduleRefresh() {
   clearTimeout(refreshTimeout)
 
   refreshTimeout = setTimeout(() => {
-    fetchTodayAppointments()
+    fetchUpcomingAppointments()
   }, 500)
 }
 
 // SUBSCRIBE TO APPOINTMENT CHANGES
 function subscribeToAppointments() {
   realtimeChannel = supabase
-    .channel('library-today-appointments')
+    .channel('library-upcoming-appointments')
     .on(
       'postgres_changes',
       {
@@ -168,7 +171,7 @@ function subscribeToAppointments() {
 
 // COMPONENT MOUNT
 onMounted(async () => {
-  await fetchTodayAppointments()
+  await fetchUpcomingAppointments()
   subscribeToAppointments()
 })
 
@@ -185,13 +188,19 @@ onUnmounted(() => {
 
 <template>
   <section class="activity-card">
+
     <div class="card-heading">
-      <h2>Today's Appointment</h2>
+      <div>
+        <h2>Upcoming Appointments</h2>
+        <p class="subtitle">
+          View scheduled Library appointments.
+        </p>
+      </div>
 
       <button
         type="button"
         class="refresh-button"
-        @click="fetchTodayAppointments"
+        @click="fetchUpcomingAppointments"
         :disabled="loading"
       >
         {{ loading ? 'Loading...' : 'Refresh' }}
@@ -221,9 +230,15 @@ onUnmounted(() => {
         :key="appointment.id"
         class="appointment-row"
       >
-        <strong class="appointment-time">
-          {{ appointment.time }}
-        </strong>
+        <div class="date-time">
+          <strong class="appointment-date">
+            {{ appointment.date }}
+          </strong>
+
+          <span class="appointment-time">
+            {{ appointment.time }}
+          </span>
+        </div>
 
         <div class="details">
           <strong>{{ appointment.name }}</strong>
@@ -240,16 +255,18 @@ onUnmounted(() => {
     </div>
 
     <p v-else class="empty-message">
-      No appointments scheduled for today.
+      No upcoming appointments found.
     </p>
+
   </section>
 </template>
 
 <style scoped>
 .activity-card {
+  width: 100%;
   min-width: 0;
   min-height: 184px;
-  padding: 10px 12px;
+  padding: 12px;
   border: 1px solid #8a4143;
   border-radius: 24px;
   color: #390607;
@@ -268,7 +285,14 @@ h2 {
   font: bold 24px Georgia, serif;
 }
 
+.subtitle {
+  margin: 5px 0 0;
+  color: #795b5d;
+  font-size: 11px;
+}
+
 .refresh-button {
+  flex-shrink: 0;
   border: 1px solid #95686a;
   border-radius: 6px;
   padding: 6px 10px;
@@ -291,14 +315,26 @@ h2 {
 .appointment-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 0 14px;
+  gap: 12px;
+  padding: 10px 0 14px;
   border-bottom: 1px solid #e4caca;
   font-size: 12px;
 }
 
+.date-time {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 105px;
+}
+
+.appointment-date {
+  color: #650b18;
+}
+
 .appointment-time {
-  min-width: 75px;
+  color: #795b5d;
+  font-size: 11px;
 }
 
 .details {
@@ -306,11 +342,11 @@ h2 {
   flex: 1;
   min-width: 0;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
 }
 
 .details strong {
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .details span {
@@ -319,6 +355,7 @@ h2 {
 }
 
 .status {
+  flex-shrink: 0;
   padding: 5px 10px;
   border-radius: 20px;
   background: #f5e6a1;
@@ -327,22 +364,19 @@ h2 {
   white-space: nowrap;
 }
 
-.status.confirmed,
-.status.completed {
+.status.confirmed {
   background: #b9e0c6;
   color: #315f42;
 }
 
-.status.cancelled,
-.status.rejected,
-.status.no-show {
-  background: #f2cccc;
-  color: #9a0000;
+.status.reschedule-requested {
+  background: #dce4fa;
+  color: #354d85;
 }
 
 .empty-message,
 .error-message {
-  padding: 18px 0;
+  padding: 25px 0;
   font-size: 12px;
   text-align: center;
 }
@@ -353,11 +387,24 @@ h2 {
 
 .error-message {
   color: #b00020;
+  overflow-wrap: anywhere;
 }
 
-@media (max-width: 480px) {
+@media (max-width: 600px) {
+  .card-heading {
+    align-items: flex-start;
+  }
+
+  h2 {
+    font-size: 20px;
+  }
+
   .appointment-row {
     flex-wrap: wrap;
+  }
+
+  .date-time {
+    min-width: 90px;
   }
 }
 </style>

@@ -30,7 +30,6 @@ const showAddBookModal = ref(false)
 const showConfirmation = ref(false)
 
 const selectedRequest = ref(null)
-const selectedLoan = ref(null)
 const confirmationAction = ref('')
 
 const newBook = ref({
@@ -48,9 +47,24 @@ let subscriptions = []
 // COMPUTED DATA
 // ========================================
 
+function isReturnRequest(request) {
+  return Boolean(request.book_loan_id) ||
+    String(request.title || '')
+      .toLowerCase()
+      .startsWith('book return request:')
+}
+
 const pendingRequests = computed(() =>
   requests.value.filter(request =>
-    String(request.status || '').toLowerCase() === 'pending'
+    String(request.status || '').toLowerCase() === 'pending' &&
+    !isReturnRequest(request)
+  )
+)
+
+const pendingReturnRequests = computed(() =>
+  requests.value.filter(request =>
+    String(request.status || '').toLowerCase() === 'pending' &&
+    isReturnRequest(request)
   )
 )
 
@@ -103,16 +117,16 @@ const confirmationTitle = computed(() => {
 })
 
 const confirmationMessage = computed(() => {
-  if (confirmationAction.value === 'Return') {
-    return `Confirm that ${selectedLoan.value?.book?.title || 'this book'} has been returned by ${selectedLoan.value?.student?.full_name || 'the student'}?`
-  }
-
   const request = selectedRequest.value
 
   if (!request) return ''
 
   const bookTitle = request.book?.title || request.title || 'this book'
   const studentName = request.student?.full_name || 'Unknown student'
+
+  if (confirmationAction.value === 'Return') {
+    return `Confirm that ${studentName} has returned ${bookTitle}?`
+  }
 
   if (confirmationAction.value === 'Approve') {
     return `Approve ${studentName}'s request for ${bookTitle}?`
@@ -270,7 +284,7 @@ async function addBook() {
 }
 
 // ========================================
-// FETCH PENDING BORROW REQUESTS
+// FETCH LIBRARY REQUESTS
 // ========================================
 
 async function fetchRequests() {
@@ -284,6 +298,7 @@ async function fetchRequests() {
         id,
         student_id,
         book_id,
+        book_loan_id,
         title,
         details,
         request_type,
@@ -443,18 +458,17 @@ async function refreshAll() {
 
 function openConfirmation(request, action) {
   selectedRequest.value = request
-  selectedLoan.value = null
   confirmationAction.value = action
   actionError.value = ''
   actionMessage.value = ''
   showConfirmation.value = true
 }
 
-function openReturnConfirmation(loan) {
-  selectedLoan.value = loan
-  selectedRequest.value = null
+function openReturnConfirmation(request) {
+  selectedRequest.value = request
   confirmationAction.value = 'Return'
   actionError.value = ''
+  actionMessage.value = ''
   showConfirmation.value = true
 }
 
@@ -463,12 +477,11 @@ function closeConfirmation() {
 
   showConfirmation.value = false
   selectedRequest.value = null
-  selectedLoan.value = null
   actionError.value = ''
 }
 
 // ========================================
-// APPROVE / CANCEL / RETURN
+// APPROVE / CANCEL / CONFIRM RETURN
 // ========================================
 
 async function confirmRequest() {
@@ -479,10 +492,16 @@ async function confirmRequest() {
   actionMessage.value = ''
 
   try {
-    // APPROVE REQUEST
+    // APPROVE BORROW REQUEST
     if (confirmationAction.value === 'Approve') {
       if (!selectedRequest.value) {
         throw new Error('No selected request.')
+      }
+
+      if (isReturnRequest(selectedRequest.value)) {
+        throw new Error(
+          'This is a return request. Please use Confirm Return instead.'
+        )
       }
 
       if (!selectedRequest.value.book_id) {
@@ -503,13 +522,22 @@ async function confirmRequest() {
       actionMessage.value = 'Borrow request approved successfully.'
     }
 
-    // CANCEL REQUEST
+    // CANCEL BORROW REQUEST
     else if (confirmationAction.value === 'Cancel') {
       if (!selectedRequest.value) {
         throw new Error('No selected request.')
       }
 
-      const { data: userData } = await supabase.auth.getUser()
+      if (isReturnRequest(selectedRequest.value)) {
+        throw new Error(
+          'This is a return request. It cannot be cancelled through this action.'
+        )
+      }
+
+      const { data: userData, error: userError } =
+        await supabase.auth.getUser()
+
+      if (userError) throw userError
 
       const { data, error } = await supabase
         .from('service_requests')
@@ -535,27 +563,38 @@ async function confirmRequest() {
       actionMessage.value = 'Borrow request cancelled successfully.'
     }
 
-    // RETURN BOOK
+    // CONFIRM BOOK RETURN REQUEST
     else if (confirmationAction.value === 'Return') {
-      if (!selectedLoan.value) {
-        throw new Error('No selected book loan.')
+      if (!selectedRequest.value) {
+        throw new Error('No selected return request.')
       }
 
-      const { error } = await supabase.rpc(
-        'return_library_book',
+      if (!isReturnRequest(selectedRequest.value)) {
+        throw new Error('This is not a valid book return request.')
+      }
+
+      if (!selectedRequest.value.book_loan_id) {
+        throw new Error(
+          'This return request has no linked book loan.'
+        )
+      }
+
+      const { data, error } = await supabase.rpc(
+        'confirm_library_book_return',
         {
-          p_loan_id: selectedLoan.value.id,
+          p_return_request_id: selectedRequest.value.id,
         }
       )
 
       if (error) throw error
 
-      actionMessage.value = 'Book returned successfully.'
+      actionMessage.value = data === false
+        ? 'This return request was already processed.'
+        : 'Book return confirmed successfully. Available copies have been updated.'
     }
 
     showConfirmation.value = false
     selectedRequest.value = null
-    selectedLoan.value = null
 
     await refreshAll()
   } catch (error) {
@@ -656,11 +695,19 @@ onUnmounted(() => {
         @click="activeTab = tab"
       >
         {{ tab }}
+
         <span
           v-if="tab === 'Borrow Requests' && pendingRequests.length"
           class="tab-count"
         >
           {{ pendingRequests.length }}
+        </span>
+
+        <span
+          v-if="tab === 'Borrowed & Returns' && pendingReturnRequests.length"
+          class="tab-count"
+        >
+          {{ pendingReturnRequests.length }}
         </span>
       </button>
     </nav>
@@ -803,7 +850,10 @@ onUnmounted(() => {
             </thead>
 
             <tbody>
-              <tr v-for="request in otherRequests" :key="request.id">
+              <tr
+                v-for="request in otherRequests.filter(item => !isReturnRequest(item))"
+                :key="request.id"
+              >
                 <td>
                   {{ request.student?.full_name || 'Unknown Student' }}
                 </td>
@@ -826,9 +876,11 @@ onUnmounted(() => {
                 </td>
               </tr>
 
-              <tr v-if="otherRequests.length === 0">
+              <tr
+                v-if="otherRequests.filter(item => !isReturnRequest(item)).length === 0"
+              >
                 <td colspan="4" class="empty-cell">
-                  No request history yet.
+                  No borrow request history yet.
                 </td>
               </tr>
             </tbody>
@@ -934,6 +986,85 @@ onUnmounted(() => {
 
     <section v-else>
 
+      <!-- PENDING RETURN REQUESTS -->
+
+      <div class="history-section return-requests-section">
+        <h3>Pending Return Requests</h3>
+
+        <p v-if="requestsError" class="error-message">
+          {{ requestsError }}
+        </p>
+
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>Book</th>
+                <th>Request Details</th>
+                <th>Date Submitted</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              <tr
+                v-for="request in pendingReturnRequests"
+                :key="request.id"
+              >
+                <td>
+                  <strong>
+                    {{ request.student?.full_name || 'Unknown Student' }}
+                  </strong>
+                </td>
+
+                <td>
+                  <strong>
+                    {{ request.book?.title || request.title || 'Unknown Book' }}
+                  </strong>
+                </td>
+
+                <td>
+                  {{ request.details || 'Book return request' }}
+                </td>
+
+                <td>
+                  {{ formatDate(request.submitted_at) }}
+                </td>
+
+                <td>
+                  <span class="status pending">
+                    Pending Return
+                  </span>
+                </td>
+
+                <td>
+                  <button
+                    type="button"
+                    class="action-button return-button"
+                    :disabled="processing"
+                    @click="openReturnConfirmation(request)"
+                  >
+                    Confirm Return
+                  </button>
+                </td>
+              </tr>
+
+              <tr
+                v-if="!loadingRequests && pendingReturnRequests.length === 0"
+              >
+                <td colspan="6" class="empty-cell">
+                  No pending return requests.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- CURRENTLY BORROWED -->
+
       <div class="section-toolbar">
         <span>
           Currently Borrowed: {{ activeLoans.length }}
@@ -989,14 +1120,9 @@ onUnmounted(() => {
               </td>
 
               <td>
-                <button
-                  type="button"
-                  class="action-button return-button"
-                  :disabled="processing"
-                  @click="openReturnConfirmation(loan)"
-                >
-                  Mark Returned
-                </button>
+                <span class="waiting-return">
+                  Waiting for return request
+                </span>
               </td>
             </tr>
 
@@ -1073,6 +1199,7 @@ onUnmounted(() => {
     >
       <div class="modal-content">
         <h2>Add New Book</h2>
+
         <p class="modal-description">
           Enter the book details.
         </p>
@@ -1201,7 +1328,7 @@ onUnmounted(() => {
             :disabled="processing"
             @click="confirmRequest"
           >
-            {{ processing ? 'Processing...' : confirmationAction }}
+            {{ processing ? 'Processing...' : confirmationAction === 'Return' ? 'Confirm Return' : confirmationAction }}
           </button>
         </div>
       </div>
@@ -1416,6 +1543,10 @@ onUnmounted(() => {
   color: white;
 }
 
+.return-button:hover {
+  background: #1f603d;
+}
+
 .danger-button {
   border-color: #bd2020;
   background: #bd2020;
@@ -1464,12 +1595,22 @@ onUnmounted(() => {
   margin-top: 25px;
 }
 
+.return-requests-section {
+  margin-bottom: 25px;
+}
+
 .history-section h3 {
   margin: 0 0 12px;
   color: #542d30;
   font-family: Georgia, 'Times New Roman', serif;
   font-size: 18px;
   font-weight: 500;
+}
+
+.waiting-return {
+  color: #795f60;
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 .empty-cell {
@@ -1609,6 +1750,10 @@ onUnmounted(() => {
 
   .tab-button {
     padding: 9px 12px;
+  }
+
+  .section-toolbar {
+    flex-wrap: wrap;
   }
 }
 </style>

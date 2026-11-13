@@ -23,6 +23,10 @@ const isPending = computed(
   () => props.request?.databaseStatus === 'pending',
 )
 
+const isProcessing = computed(
+  () => props.request?.databaseStatus === 'processing',
+)
+
 watch(
   () => props.request,
   (request) => {
@@ -40,16 +44,28 @@ function handleConfirmClick() {
 function handleSave() {
   if (!props.request) return
 
-  emit('save', {
+  emit('change-status', 'Confirm', {
     id: props.request.id,
     expectedDate: expectedDate.value,
     instruction: instruction.value,
   })
 }
 
+function handleComplete() {
+  if (!props.request) return
+
+  emit('change-status', 'Complete', {
+    id: props.request.id,
+  })
+}
+
 function handleCancel() {
   showConfirmationFields.value = false
   emit('change-status', 'Cancel')
+}
+
+function handleBack() {
+  showConfirmationFields.value = false
 }
 </script>
 
@@ -113,6 +129,7 @@ function handleCancel() {
       <p>{{ request.details }}</p>
     </div>
 
+    <!-- PENDING ACTIONS -->
     <div
       v-if="isPending && !showConfirmationFields"
       class="action-area"
@@ -140,12 +157,13 @@ function handleCancel() {
       </div>
     </div>
 
+    <!-- REQUEST HANDLING DETAILS -->
     <div
       v-if="isPending && showConfirmationFields"
       class="confirmation-fields"
     >
       <div class="section-heading">
-        <p class="eyebrow">CONFIRM REQUEST</p>
+        <p class="eyebrow">REQUEST HANDLING</p>
         <h3>Request Handling Details</h3>
         <p>
           Set the expected completion date and provide any instructions.
@@ -168,14 +186,14 @@ function handleCancel() {
           v-model="instruction"
           rows="4"
           placeholder="Enter instructions or notes for the student..."
-        />
+        ></textarea>
       </div>
 
       <div class="action-buttons">
         <button
           type="button"
           class="confirm-button"
-          @click="emit('change-status', 'Confirm')"
+          @click="handleSave"
         >
           Confirm Request
         </button>
@@ -183,15 +201,33 @@ function handleCancel() {
         <button
           type="button"
           class="cancel-button"
-          @click="showConfirmationFields = false"
+          @click="handleBack"
         >
           Back
         </button>
       </div>
     </div>
 
+    <!-- PROCESSING / COMPLETED / CANCELLED -->
     <div v-if="!isPending" class="final-status">
-      <p>
+      <p v-if="isProcessing">
+        This request is currently being processed.
+      </p>
+
+      <p v-else-if="request.databaseStatus === 'completed'">
+        This request has been completed.
+      </p>
+
+      <p
+        v-else-if="
+          request.databaseStatus === 'cancelled' ||
+          request.databaseStatus === 'rejected'
+        "
+      >
+        This request has been cancelled.
+      </p>
+
+      <p v-else>
         This request has already been handled.
       </p>
 
@@ -204,6 +240,17 @@ function handleCancel() {
         <span>Instruction / Notes</span>
         <p>{{ request.instruction }}</p>
       </div>
+
+      <!-- COMPLETE BUTTON: PROCESSING ONLY -->
+      <div v-if="isProcessing" class="action-buttons">
+        <button
+          type="button"
+          class="complete-button"
+          @click="handleComplete"
+        >
+          Complete Request
+        </button>
+      </div>
     </div>
   </section>
 
@@ -215,6 +262,9 @@ function handleCancel() {
 
 <style scoped>
 .details-panel {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 22px;
   border: 1px solid #d5bdbc;
   border-radius: 12px;
@@ -226,6 +276,7 @@ function handleCancel() {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
   margin-bottom: 22px;
 }
 
@@ -244,6 +295,7 @@ function handleCancel() {
 }
 
 .close-button {
+  flex-shrink: 0;
   width: 30px;
   height: 30px;
   border: 0;
@@ -289,9 +341,15 @@ function handleCancel() {
   color: #80500d !important;
 }
 
-.status.borrowed {
+.status.borrowed,
+.status.completed {
   background: #e0efdf;
   color: #28632e !important;
+}
+
+.status.processing {
+  background: #e0eafa;
+  color: #28558a !important;
 }
 
 .status.cancelled,
@@ -402,6 +460,20 @@ function handleCancel() {
   color: #56090d;
 }
 
+.complete-button {
+  background: #28632e;
+  color: white;
+}
+
+.confirm-button:hover,
+.complete-button:hover {
+  filter: brightness(1.1);
+}
+
+.cancel-button:hover {
+  background: #dfcecc;
+}
+
 .final-status {
   margin-top: 20px;
   padding-top: 15px;
@@ -411,6 +483,7 @@ function handleCancel() {
 .final-status > p {
   color: #795f60;
   font-size: 11px;
+  line-height: 1.6;
 }
 
 .saved-notes {
@@ -437,5 +510,27 @@ function handleCancel() {
 .empty-details p {
   color: #795f60;
   font-size: 12px;
+}
+
+@media (max-width: 600px) {
+  .details-panel {
+    padding: 16px;
+  }
+
+  .info-row {
+    gap: 10px;
+  }
+
+  .info-row strong {
+    max-width: 58%;
+  }
+
+  .action-buttons {
+    flex-direction: column;
+  }
+
+  .action-buttons button {
+    width: 100%;
+  }
 }
 </style>
