@@ -109,17 +109,6 @@ function formatDate(date) {
           View details
         </button>
       </article>
-
-      <article class="stat-card">
-        <p>READY FOR PICKUP</p>
-        <strong>{{ readyForPickup }}</strong>
-        <button
-          type="button"
-          @click="emit('navigate', 'Appointments', 'Ready for Pickup')"
-        >
-          View details
-        </button>
-      </article>
     </section>
 
     <section class="bottom-grid">
@@ -237,8 +226,9 @@ function formatDate(date) {
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
+  width: 100%;
   margin-bottom: 30px;
 }
 

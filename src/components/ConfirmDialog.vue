@@ -1,6 +1,8 @@
 
 <script setup>
-defineProps({
+import { computed } from 'vue'
+
+const props = defineProps({
   visible: {
     type: Boolean,
     default: false
@@ -20,10 +22,26 @@ defineProps({
   danger: {
     type: Boolean,
     default: false
+  },
+  action: {
+    type: String,
+    default: ''
   }
 })
 
 const emit = defineEmits(['confirm', 'close'])
+
+// CONFIRM APPOINTMENT ICON
+const isAppointmentConfirm = computed(() =>
+  props.action === 'Confirm' ||
+  props.title === 'Confirm this Appointment?'
+)
+
+// RESCHEDULE APPOINTMENT ICON
+const isReschedule = computed(() =>
+  props.action === 'Reschedule' ||
+  props.title === 'Reschedule this Appointment?'
+)
 </script>
 
 <template>
@@ -41,7 +59,64 @@ const emit = defineEmits(['confirm', 'close'])
         :aria-label="title"
       >
         <div class="modal-heading">
-          <div class="modal-icon" :class="{ warning: danger }">!</div>
+
+          <!-- GREEN CALENDAR CHECK FOR CONFIRM APPOINTMENT -->
+          <div
+            v-if="isAppointmentConfirm"
+            class="modal-icon appointment-confirm-icon"
+            aria-hidden="true"
+          >
+            <svg
+              width="25"
+              height="25"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <rect x="3" y="5" width="18" height="16" rx="2" />
+              <path d="M16 3v4M8 3v4M3 10h18" />
+              <path d="m9 16 2 2 4-4" />
+            </svg>
+          </div>
+
+          <!-- MAROON CALENDAR CLOCK FOR RESCHEDULE -->
+          <div
+            v-else-if="isReschedule"
+            class="modal-icon reschedule-icon"
+            aria-hidden="true"
+          >
+            <svg
+              width="25"
+              height="25"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M8 2v4M16 2v4M3 10h18" />
+              <path
+                d="M21 13V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h7"
+              />
+              <circle cx="18" cy="18" r="4" />
+              <path d="M18 16v2l1.5 1" />
+            </svg>
+          </div>
+
+          <!-- RED WARNING FOR CANCEL / NO-SHOW -->
+          <div
+            v-else
+            class="modal-icon"
+            :class="{ warning: danger }"
+            aria-hidden="true"
+          >
+            !
+          </div>
+
           <h2>{{ title }}</h2>
         </div>
 
@@ -112,6 +187,30 @@ const emit = defineEmits(['confirm', 'close'])
   font-family: Arial, Helvetica, sans-serif;
   font-size: 25px;
   font-weight: bold;
+}
+
+/* GREEN ICON FOR CONFIRM APPOINTMENT */
+
+.appointment-confirm-icon {
+  color: #287a4b;
+  background: #e1f0e5;
+}
+
+.appointment-confirm-icon svg {
+  display: block;
+  flex-shrink: 0;
+}
+
+/* MAROON ICON FOR RESCHEDULE APPOINTMENT */
+
+.reschedule-icon {
+  color: #650f18;
+  background: #f0dfe1;
+}
+
+.reschedule-icon svg {
+  display: block;
+  flex-shrink: 0;
 }
 
 .modal-heading h2 {

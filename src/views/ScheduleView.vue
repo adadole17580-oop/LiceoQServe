@@ -1,6 +1,6 @@
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 
 const props = defineProps({
   accessToken: {
@@ -8,8 +8,6 @@ const props = defineProps({
     required: true
   }
 })
-
-const emit = defineEmits(['navigate'])
 
 const API_BASE_URL = 'http://localhost:3000'
 
@@ -22,6 +20,13 @@ const blockedSchedules = ref([])
 
 const isLoading = ref(false)
 const isSaving = ref(false)
+const isRemoving = ref(null)
+
+const errorMessage = ref('')
+const successMessage = ref('')
+
+const showRemoveDialog = ref(false)
+const selectedBlockedId = ref(null)
 
 const dayNames = [
   'Sunday',
@@ -45,13 +50,33 @@ const timeOptions = [
   '9:00 AM - 5:00 PM'
 ]
 
+const sortedOfficeHours = computed(() => {
+  return dayNames.map((name, index) => {
+    const record = officeHours.value.find(
+      item => Number(item.day_of_week) === index
+    )
+
+    return {
+      day: name,
+      isOpen: record ? Boolean(record.is_open) : false,
+      openingTime: record?.opening_time || null,
+      closingTime: record?.closing_time || null,
+      hasRecord: Boolean(record)
+    }
+  })
+})
+
+const blockedCount = computed(() => blockedSchedules.value.length)
+
 // ========================================
 // BACKEND API REQUEST
 // ========================================
 
 async function apiRequest(endpoint, options = {}) {
   if (!props.accessToken) {
-    throw new Error('Authentication token is missing. Please log in again.')
+    throw new Error(
+      'Authentication token is missing. Please log in again.'
+    )
   }
 
   const response = await fetch(`${API_BASE_URL}${endpoint}`, {
@@ -75,17 +100,17 @@ async function apiRequest(endpoint, options = {}) {
 }
 
 // ========================================
-// FORMAT DATE AND TIME
+// DATE AND TIME HELPERS
 // ========================================
-
-function getDayName(day) {
-  return dayNames[Number(day)] || 'Unknown'
-}
 
 function formatDatabaseTime(time) {
   if (!time) return ''
 
-  const [hour, minute] = time.split(':').map(Number)
+  const [hour, minute] = String(time).split(':').map(Number)
+
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) {
+    return ''
+  }
 
   return `${hour % 12 || 12}:${String(minute).padStart(2, '0')} ${
     hour >= 12 ? 'PM' : 'AM'
@@ -95,14 +120,22 @@ function formatDatabaseTime(time) {
 function formatDate(date) {
   if (!date) return ''
 
-  return new Date(`${date}T12:00:00`).toLocaleDateString('en-US', {
-    month: 'long',
-    day: 'numeric'
-  })
+  const dateText = String(date).slice(0, 10)
+
+  return new Date(`${dateText}T12:00:00`).toLocaleDateString(
+    'en-US',
+    {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric'
+    }
+  )
 }
 
 function convertToDatabaseTime(timeText) {
-  const match = timeText.match(/^(\d{1,2}):(\d{2})\s(AM|PM)$/)
+  const match = String(timeText).match(
+    /^(\d{1,2}):(\d{2})\s(AM|PM)$/
+  )
 
   if (!match) {
     throw new Error('Invalid selected time.')
@@ -112,15 +145,26 @@ function convertToDatabaseTime(timeText) {
   const minute = match[2]
   const period = match[3]
 
-  if (period === 'PM' && hour !== 12) {
-    hour += 12
-  }
-
-  if (period === 'AM' && hour === 12) {
-    hour = 0
-  }
+  if (period === 'PM' && hour !== 12) hour += 12
+  if (period === 'AM' && hour === 12) hour = 0
 
   return `${String(hour).padStart(2, '0')}:${minute}:00`
+}
+
+function getTodayDate() {
+  const now = new Date()
+
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(now)
+
+  const getPart = type =>
+    parts.find(part => part.type === type)?.value || ''
+
+  return `${getPart('year')}-${getPart('month')}-${getPart('day')}`
 }
 
 // ========================================
@@ -150,7 +194,8 @@ async function loadBlockedSchedules() {
     time: item.is_all_day
       ? '9:00 AM - 5:00 PM'
       : `${formatDatabaseTime(item.start_time)} - ${formatDatabaseTime(item.end_time)}`,
-    reason: item.reason || 'Unavailable'
+    reason: item.reason || 'Unavailable',
+    isAllDay: Boolean(item.is_all_day)
   }))
 }
 
@@ -159,7 +204,10 @@ async function loadBlockedSchedules() {
 // ========================================
 
 async function loadScheduleData() {
+  if (isLoading.value) return
+
   isLoading.value = true
+  errorMessage.value = ''
 
   try {
     await Promise.all([
@@ -168,20 +216,57 @@ async function loadScheduleData() {
     ])
   } catch (error) {
     console.error('Failed to load Guidance schedule:', error)
+    errorMessage.value = `Unable to load schedule: ${error.message}`
+  } finally {
+    isLoading.value = false
+  }
+}
 
-    alert(`Unable to load schedule: ${error.message}`)
+async function refreshOfficeHours() {
+  if (isLoading.value) return
+
+  isLoading.value = true
+  errorMessage.value = ''
+
+  try {
+    await loadOfficeHours()
+  } catch (error) {
+    errorMessage.value = error.message
+  } finally {
+    isLoading.value = false
+  }
+}
+
+async function refreshBlockedSchedules() {
+  if (isLoading.value) return
+
+  isLoading.value = true
+  errorMessage.value = ''
+
+  try {
+    await loadBlockedSchedules()
+  } catch (error) {
+    errorMessage.value = error.message
   } finally {
     isLoading.value = false
   }
 }
 
 // ========================================
-// ADD BLOCKED SCHEDULE
+// BLOCK DATE OR TIME
 // ========================================
 
 async function blockSchedule() {
+  errorMessage.value = ''
+  successMessage.value = ''
+
   if (!selectedDate.value || !selectedTime.value) {
-    alert('Please select a date and time.')
+    errorMessage.value = 'Please select a date and time.'
+    return
+  }
+
+  if (selectedDate.value < getTodayDate()) {
+    errorMessage.value = 'Please select today or a future date.'
     return
   }
 
@@ -218,24 +303,48 @@ async function blockSchedule() {
     selectedTime.value = ''
     blockReason.value = ''
 
-    alert('Schedule blocked successfully.')
+    successMessage.value = 'Schedule blocked successfully!'
   } catch (error) {
     console.error('Failed to block schedule:', error)
-
-    alert(error.message)
+    errorMessage.value = error.message
   } finally {
     isSaving.value = false
   }
 }
 
 // ========================================
-// DELETE BLOCKED SCHEDULE
+// OPEN REMOVE CONFIRMATION
 // ========================================
 
-async function removeBlockedSchedule(id) {
-  if (!confirm('Are you sure you want to remove this blocked schedule?')) {
-    return
-  }
+function removeBlockedSchedule(id) {
+  if (isRemoving.value !== null) return
+
+  selectedBlockedId.value = id
+  showRemoveDialog.value = true
+
+  errorMessage.value = ''
+  successMessage.value = ''
+}
+
+function cancelRemove() {
+  if (isRemoving.value !== null) return
+
+  showRemoveDialog.value = false
+  selectedBlockedId.value = null
+}
+
+// ========================================
+// CONFIRM REMOVE
+// ========================================
+
+async function confirmRemove() {
+  const id = selectedBlockedId.value
+
+  if (!id || isRemoving.value !== null) return
+
+  isRemoving.value = id
+  errorMessage.value = ''
+  successMessage.value = ''
 
   try {
     await apiRequest(
@@ -249,11 +358,19 @@ async function removeBlockedSchedule(id) {
       item => item.id !== id
     )
 
-    alert('Blocked schedule removed successfully.')
+    showRemoveDialog.value = false
+    selectedBlockedId.value = null
+
+    successMessage.value =
+      'Blocked schedule removed successfully!'
   } catch (error) {
     console.error('Failed to remove blocked schedule:', error)
+    errorMessage.value = error.message
 
-    alert(error.message)
+    showRemoveDialog.value = false
+    selectedBlockedId.value = null
+  } finally {
+    isRemoving.value = null
   }
 }
 
@@ -268,61 +385,75 @@ onMounted(() => {
 
 <template>
   <div class="schedule-page">
+
+    <!-- PAGE HEADING -->
     <header class="page-heading">
-      <h1>Manage Schedule</h1>
+      <h1>Schedule Management</h1>
       <p>
         Manage office hours, availability, slots and blocked dates
       </p>
     </header>
 
+    <!-- FEEDBACK MESSAGES -->
+    <p
+      v-if="errorMessage"
+      class="feedback-message error-message"
+      role="alert"
+    >
+      {{ errorMessage }}
+    </p>
+
+    <p
+      v-if="successMessage"
+      class="feedback-message success-message"
+      role="status"
+    >
+      {{ successMessage }}
+    </p>
+
+    <!-- TOP PANELS -->
     <div class="schedule-grid">
 
       <!-- OFFICE HOURS -->
       <section class="schedule-panel office-panel">
-        <h2>Office Hours</h2>
+       <div class="panel-heading">
+  <h2>Office Hours</h2>
+</div>
 
         <div class="office-hours-list">
           <div
-            v-for="item in officeHours"
-            :key="item.id"
+            v-for="item in sortedOfficeHours"
+            :key="item.day"
             class="office-hour-row"
           >
-            <strong>
-              {{ getDayName(item.day_of_week) }}
-            </strong>
+            <span class="day-name">
+              {{ item.day }}
+            </span>
 
-            <span>
-              <template v-if="item.is_open">
-                {{ formatDatabaseTime(item.opening_time) }}
+            <span class="office-time">
+              <template v-if="item.isOpen">
+                {{ formatDatabaseTime(item.openingTime) }}
                 -
-                {{ formatDatabaseTime(item.closing_time) }}
+                {{ formatDatabaseTime(item.closingTime) }}
+              </template>
+
+              <template v-else-if="item.hasRecord">
+                Closed
               </template>
 
               <template v-else>
-                Closed
+                {{ isLoading ? 'Loading...' : 'Not configured' }}
               </template>
             </span>
           </div>
-
-          <p
-            v-if="isLoading && !officeHours.length"
-            class="empty-message"
-          >
-            Loading office hours...
-          </p>
-
-          <p
-            v-else-if="!officeHours.length"
-            class="empty-message"
-          >
-            No office hours available.
-          </p>
         </div>
       </section>
 
       <!-- BLOCK A DATE OR TIME -->
       <section class="schedule-panel block-panel">
-        <h2>Block a date or time</h2>
+        <div class="panel-heading">
+          <h2>Block a date or time</h2>
+        </div>
 
         <form @submit.prevent="blockSchedule">
           <label for="block-date" class="visually-hidden">
@@ -333,6 +464,7 @@ onMounted(() => {
             id="block-date"
             v-model="selectedDate"
             type="date"
+            :min="getTodayDate()"
             required
           />
 
@@ -366,7 +498,7 @@ onMounted(() => {
             id="block-reason"
             v-model="blockReason"
             type="text"
-            placeholder="Reason (e.g. University Event)"
+            placeholder="Reason (optional)"
           />
 
           <button
@@ -377,44 +509,124 @@ onMounted(() => {
             {{ isSaving ? 'SAVING...' : 'BLOCK DATE AND TIME' }}
           </button>
         </form>
+      </section>
+    </div>
 
-        <!-- BLOCKED SCHEDULE LIST -->
-        <div
-          v-for="item in blockedSchedules"
-          :key="item.id"
-          class="blocked-item"
-        >
-          <span>
-            {{ formatDate(item.date) }}
-            · {{ item.time }}
-            · {{ item.reason }}
+    <!-- BLOCKED DATES AND TIMES -->
+    <section class="schedule-panel blocked-panel">
+      <div class="panel-heading blocked-heading">
+        <h2>Blocked Dates and Times</h2>
+
+        <div class="blocked-heading-actions">
+          <span class="blocked-count">
+            {{ blockedCount }} blocked
           </span>
 
           <button
             type="button"
-            class="remove-button"
-            aria-label="Remove blocked schedule"
-            @click="removeBlockedSchedule(item.id)"
+            class="refresh-button"
+            :disabled="isLoading"
+            @click="refreshBlockedSchedules"
           >
-            ×
+            {{ isLoading ? 'Loading...' : 'Refresh' }}
           </button>
         </div>
+      </div>
 
-        <p
-          v-if="isLoading && !blockedSchedules.length"
-          class="empty-message"
+      <div
+        v-if="isLoading && !blockedSchedules.length"
+        class="empty-state"
+      >
+        Loading blocked schedules...
+      </div>
+
+      <div
+        v-else-if="!blockedSchedules.length"
+        class="empty-state"
+      >
+        No blocked dates or times.
+      </div>
+
+      <div v-else class="blocked-list">
+        <div
+          v-for="item in blockedSchedules"
+          :key="item.id"
+          class="blocked-row"
         >
-          Loading blocked schedules...
+          <div class="blocked-details">
+            <strong class="blocked-date">
+              {{ formatDate(item.date) }}
+            </strong>
+
+            <span class="blocked-time">
+              {{ item.time }}
+            </span>
+
+            <span
+              v-if="item.reason && item.reason !== 'Unavailable'"
+              class="blocked-reason"
+            >
+              {{ item.reason }}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            class="remove-button"
+            :disabled="isRemoving === item.id"
+            @click="removeBlockedSchedule(item.id)"
+          >
+            {{ isRemoving === item.id ? 'Removing...' : 'Remove' }}
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- CUSTOM REMOVE CONFIRMATION MODAL -->
+    <div
+      v-if="showRemoveDialog"
+      class="modal-overlay"
+      @click.self="cancelRemove"
+    >
+      <div
+        class="confirmation-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="remove-dialog-title"
+      >
+        <div class="modal-icon">!</div>
+
+        <h2 id="remove-dialog-title">
+          Remove Blocked Schedule?
+        </h2>
+
+        <p>
+          Are you sure you want to remove this blocked
+          date or time? This action cannot be undone.
         </p>
 
-        <p
-          v-else-if="!blockedSchedules.length"
-          class="empty-message"
-        >
-          No blocked dates or times.
-        </p>
-      </section>
+        <div class="modal-actions">
+          <button
+            type="button"
+            class="modal-cancel-button"
+            :disabled="isRemoving !== null"
+            @click="cancelRemove"
+          >
+            Cancel
+          </button>
+
+          <button
+            type="button"
+            class="modal-confirm-button"
+            :disabled="isRemoving !== null"
+            @click="confirmRemove"
+          >
+            {{ isRemoving !== null ? 'Removing...' : 'Remove' }}
+          </button>
+        </div>
+      </div>
     </div>
+
   </div>
 </template>
 
@@ -425,67 +637,108 @@ onMounted(() => {
   color: #39090c;
 }
 
+/* PAGE HEADING */
+
 .page-heading {
-  margin-bottom: 34px;
+  margin-bottom: 24px;
 }
 
 .page-heading h1 {
-  margin: 0 0 2px;
+  margin: 0 0 3px;
   font-family: Georgia, 'Times New Roman', serif;
-  font-size: clamp(27px, 3vw, 34px);
+  font-size: 31px;
   font-weight: 500;
 }
 
 .page-heading p {
   margin: 0;
-  font-size: 15px;
+  font-size: 13px;
+  color: #684547;
 }
+
+/* TOP PANELS */
 
 .schedule-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
-  gap: 26px;
-  padding: 0;
+  gap: 20px;
+  margin-bottom: 20px;
 }
 
 .schedule-panel {
   min-width: 0;
-  padding: 15px 16px 20px;
+  padding: 20px;
   background: #f8eeee;
-  border: 1px solid #853c43;
-  border-radius: 16px;
+  border: 1px solid #cba6a8;
+  border-radius: 13px;
 }
 
 .schedule-panel h2 {
-  margin: 0 0 23px;
+  margin: 0;
   font-family: Georgia, 'Times New Roman', serif;
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 500;
 }
 
+/* PANEL HEADERS */
+
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 17px;
+}
+
+.refresh-button {
+  flex-shrink: 0;
+  padding: 7px 12px;
+  color: #650f18;
+  background: transparent;
+  border: 1px solid #9b555b;
+  border-radius: 7px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.refresh-button:hover:not(:disabled) {
+  background: #f0dddd;
+}
+
+.refresh-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* OFFICE HOURS */
+
 .office-hours-list {
   display: grid;
-  gap: 15px;
-  padding-top: 3px;
+  gap: 17px;
+  padding-top: 2px;
+  padding-bottom: 1px;
 }
 
 .office-hour-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  font-size: 15px;
+  gap: 12px;
+  font-size: 13px;
 }
 
-.office-hour-row strong {
+.day-name {
+  font-weight: 500;
+}
+
+.office-time {
   font-weight: 600;
-}
-
-.office-hour-row span {
   text-align: right;
   white-space: nowrap;
 }
+
+/* BLOCK FORM */
 
 .block-panel form {
   display: grid;
@@ -496,79 +749,266 @@ onMounted(() => {
 .block-panel select {
   width: 100%;
   min-width: 0;
-  height: 36px;
-  padding: 6px 11px;
+  height: 42px;
+  padding: 9px 12px;
   color: #39090c;
-  background: #f8eeee;
-  border: 1px solid #9b555b;
-  border-radius: 9px;
+  background: #fffafa;
+  border: 1px solid #d5b2b5;
+  border-radius: 8px;
   font: inherit;
-  font-size: 14px;
+  font-size: 13px;
 }
 
-.block-panel input::placeholder,
-.block-panel select:invalid {
-  color: #927878;
+.block-panel input:focus,
+.block-panel select:focus {
+  outline: 2px solid #a96b70;
+  outline-offset: 1px;
+}
+
+.block-panel input::placeholder {
+  color: #947c7e;
 }
 
 .block-button {
   justify-self: start;
   min-height: 35px;
-  padding: 9px 12px;
-  color: #fffafa;
+  padding: 10px 16px;
+  color: #ffffff;
   background: #650f18;
   border: 0;
-  border-radius: 8px;
+  border-radius: 6px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
 }
 
-.block-button:hover {
+.block-button:hover:not(:disabled) {
   background: #51090e;
 }
 
 .block-button:disabled {
-  cursor: not-allowed;
   opacity: 0.6;
+  cursor: not-allowed;
 }
 
-.blocked-item {
+/* BLOCKED DATES AND TIMES */
+
+.blocked-panel {
+  width: 100%;
+}
+
+.blocked-heading {
+  margin-bottom: 0;
+  padding-bottom: 13px;
+  border-bottom: 1px solid #e3cacc;
+}
+
+.blocked-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.blocked-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 5px 12px;
+  color: #650f18;
+  background: #efd8da;
+  border-radius: 20px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.blocked-list {
+  width: 100%;
+}
+
+.blocked-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  min-height: 35px;
-  padding: 8px;
-  margin-top: 9px;
-  color: #39090c;
-  background: #dfc7c8;
-  border-radius: 8px;
+  gap: 16px;
+  min-height: 66px;
+  padding: 13px 0;
+  border-bottom: 1px solid #ead7d8;
+}
+
+.blocked-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.blocked-details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.blocked-date {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.blocked-time {
+  color: #83595d;
+  font-size: 12px;
+}
+
+.blocked-reason {
+  color: #95777a;
   font-size: 11px;
   overflow-wrap: anywhere;
 }
 
 .remove-button {
   flex-shrink: 0;
-  width: 24px;
-  height: 24px;
+  padding: 8px 13px;
   color: #650f18;
   background: transparent;
-  border: 0;
-  border-radius: 5px;
-  font-size: 20px;
+  border: 1px solid #9b555b;
+  border-radius: 7px;
+  font-size: 12px;
   cursor: pointer;
 }
 
-.remove-button:hover {
-  background: #f3dfe0;
+.remove-button:hover:not(:disabled) {
+  background: #f0dddd;
 }
 
-.empty-message {
-  margin: 14px 0 0;
-  color: #775f60;
+.remove-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* EMPTY STATES */
+
+.empty-state {
+  padding: 24px 0 10px;
+  color: #8d7274;
+  font-size: 13px;
+  text-align: center;
+}
+
+/* FEEDBACK */
+
+.feedback-message {
+  margin: 0 0 16px;
+  padding: 11px 14px;
+  border-radius: 8px;
   font-size: 12px;
 }
+
+.error-message {
+  color: #8d1c2b;
+  background: #f5dfe1;
+  border: 1px solid #dfb4ba;
+}
+
+.success-message {
+  color: #28613d;
+  background: #e1f0e5;
+  border: 1px solid #b5d6bd;
+}
+
+/* CUSTOM REMOVE CONFIRMATION */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(30, 4, 8, 0.55);
+}
+
+.confirmation-modal {
+  width: 100%;
+  max-width: 410px;
+  padding: 30px 25px;
+  background: #fff8f8;
+  border: 1px solid #d7b4b7;
+  border-radius: 16px;
+  box-shadow: 0 15px 45px rgba(0, 0, 0, 0.18);
+  text-align: center;
+}
+
+.modal-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 16px;
+  color: #650f18;
+  background: #f1dfe1;
+  border-radius: 50%;
+  font-size: 25px;
+  font-weight: 700;
+}
+
+.confirmation-modal h2 {
+  margin: 0 0 10px;
+  color: #39090c;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 23px;
+}
+
+.confirmation-modal p {
+  margin: 0 0 25px;
+  color: #775f60;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+
+.modal-cancel-button,
+.modal-confirm-button {
+  min-width: 115px;
+  padding: 11px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.modal-cancel-button {
+  color: #650f18;
+  background: transparent;
+  border: 1px solid #9b555b;
+}
+
+.modal-confirm-button {
+  color: white;
+  background: #650f18;
+  border: 1px solid #650f18;
+}
+
+.modal-cancel-button:hover:not(:disabled) {
+  background: #f1dfe1;
+}
+
+.modal-confirm-button:hover:not(:disabled) {
+  background: #51090e;
+}
+
+.modal-actions button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ACCESSIBILITY */
 
 .visually-hidden {
   position: absolute;
@@ -582,6 +1022,8 @@ onMounted(() => {
   border: 0;
 }
 
+/* RESPONSIVE */
+
 @media (max-width: 1000px) {
   .schedule-grid {
     grid-template-columns: 1fr;
@@ -590,20 +1032,37 @@ onMounted(() => {
 }
 
 @media (max-width: 600px) {
-  .page-heading {
-    margin-bottom: 22px;
+  .page-heading h1 {
+    font-size: 26px;
+  }
+
+  .page-heading p {
+    font-size: 12px;
   }
 
   .schedule-panel {
     padding: 15px 13px;
   }
 
-  .office-hour-row {
-    font-size: 13px;
+  .schedule-panel h2 {
+    font-size: 20px;
   }
 
-  .schedule-panel h2 {
-    font-size: 22px;
+  .office-hour-row {
+    font-size: 12px;
+  }
+
+  .blocked-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .blocked-heading-actions {
+    margin-left: auto;
+  }
+
+  .blocked-row {
+    gap: 10px;
   }
 }
 </style>

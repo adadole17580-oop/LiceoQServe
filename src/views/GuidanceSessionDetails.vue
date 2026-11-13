@@ -80,7 +80,7 @@ const sessionStatus = computed(() => {
     props.appointment.status || 'Pending'
   )
     .toLowerCase()
-    .replace(/[_-]/g, ' ')
+    .replace(/[\_-]/g, ' ')
     .trim()
 
   const labels = {
@@ -120,6 +120,7 @@ const isNoShow = computed(() =>
 )
 
 // ACTUAL TIMESTAMPS FROM DATABASE
+
 const rawCheckedInAt = computed(() =>
   props.appointment.checkedInAt ||
   props.appointment.checked_in_at ||
@@ -170,6 +171,7 @@ const completedAt = computed(() =>
 )
 
 // BADGE COLORS ONLY ACTIVATE WHEN TIMESTAMP EXISTS
+
 const hasCheckedInTime = computed(() =>
   Boolean(rawCheckedInAt.value)
 )
@@ -199,6 +201,7 @@ function formatSavedAt(value) {
 }
 
 // LOAD EXISTING NOTES
+
 watch(
   () => props.appointment,
   (appointment, previousAppointment) => {
@@ -217,6 +220,7 @@ watch(
 )
 
 // SAVE NOTES SUCCESS RESULT
+
 watch(
   () => props.notesSaveResult,
   (result) => {
@@ -238,6 +242,7 @@ watch(
 )
 
 // CONFIRMATION DIALOG DETAILS
+
 const dialogDetails = computed(() => {
   const dialogs = {
     'Check In': {
@@ -525,7 +530,88 @@ function saveNotes() {
         :aria-label="dialogDetails.title"
       >
         <div class="modal-heading">
-          <div class="warning-icon">!</div>
+
+          <!-- GREEN USER CHECK ICON FOR CHECK IN -->
+          <div
+            v-if="dialogAction === 'Check In'"
+            class="warning-icon check-in-icon"
+            aria-hidden="true"
+          >
+            <svg
+              width="30"
+              height="30"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path
+                d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"
+              />
+              <circle cx="9" cy="7" r="4" />
+              <path d="m16 11 2 2 4-4" />
+            </svg>
+          </div>
+
+<!-- GREEN PLAY ICON FOR START SESSION -->
+<div
+  v-else-if="dialogAction === 'Start Session'"
+  class="warning-icon start-session-icon"
+  aria-hidden="true"
+>
+  <svg
+    width="30"
+    height="30"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <circle cx="12" cy="12" r="9" />
+    <path d="m10 8 6 4-6 4V8Z" />
+  </svg>
+</div>
+
+<!-- INSERT COMPLETE SESSION ICON HERE -->
+<div
+  v-else-if="dialogAction === 'Complete Session'"
+  class="warning-icon complete-session-icon"
+  aria-hidden="true"
+>
+  <svg
+    width="30"
+    height="30"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path
+      d="M12 2 14.5 4 17.7 4.3 19 7.2 22 9
+         20.8 12 22 15 19 16.8 17.7 19.7
+         14.5 20 12 22 9.5 20 6.3 19.7
+         5 16.8 2 15 3.2 12 2 9 5 7.2
+         6.3 4.3 9.5 4Z"
+    />
+    <path d="m8 12 3 3 5-6" />
+  </svg>
+</div>
+
+<!-- WARNING ICON FOR NO SHOW -->
+<div
+  v-else
+  class="warning-icon"
+  aria-hidden="true"
+>
+  !
+</div>
+
           <h2>{{ dialogDetails.title }}</h2>
         </div>
 
@@ -561,6 +647,27 @@ function saveNotes() {
 </template>
 
 <style scoped>
+/* GREEN BADGE CHECK FOR COMPLETE SESSION */
+.confirmation-modal .warning-icon.complete-session-icon {
+  background-color: #e1f0e5;
+  color: #287a4b;
+}
+
+.confirmation-modal .warning-icon.complete-session-icon svg {
+  display: block;
+  flex-shrink: 0;
+  stroke: #287a4b;
+}
+/* START SESSION ICON */
+.warning-icon.start-session-icon {
+  background: #e1f0e5;
+  color: #287a4b;
+}
+
+.start-session-icon svg {
+  display: block;
+  flex-shrink: 0;
+}
 * {
   box-sizing: border-box;
 }
@@ -574,6 +681,7 @@ function saveNotes() {
 }
 
 /* HEADER */
+
 .page-header {
   display: flex;
   align-items: center;
@@ -601,6 +709,7 @@ function saveNotes() {
 }
 
 /* MAIN BUTTONS */
+
 .back-button,
 .save-button,
 .confirm-button {
@@ -632,6 +741,7 @@ function saveNotes() {
 }
 
 /* SESSION CARD */
+
 .session-card {
   width: 100%;
   padding: 25px 27px 13px;
@@ -676,6 +786,7 @@ function saveNotes() {
 }
 
 /* ACTION BUTTONS */
+
 .action-buttons {
   display: flex;
   flex-wrap: wrap;
@@ -723,6 +834,7 @@ function saveNotes() {
 }
 
 /* SESSION PROGRESS PANEL */
+
 .progress-panel {
   margin: 0 1px 16px;
   padding: 13px 16px 12px;
@@ -751,6 +863,7 @@ function saveNotes() {
 }
 
 /* DEFAULT: GREY / NEUTRAL */
+
 .stage-pill {
   display: flex;
   align-items: center;
@@ -771,6 +884,7 @@ function saveNotes() {
 }
 
 /* CHECKED IN: SOFT BLUE */
+
 .stage-pill.stage-checked-in {
   border-color: #8cb6df;
   background: #dceaf8;
@@ -778,6 +892,7 @@ function saveNotes() {
 }
 
 /* IN PROGRESS: ORIGINAL PINK */
+
 .stage-pill.stage-in-progress {
   border-color: #c58d8c;
   background: #f0c9c3;
@@ -785,6 +900,7 @@ function saveNotes() {
 }
 
 /* COMPLETED: GREEN */
+
 .stage-pill.stage-finished {
   border-color: #83c89b;
   background: #c7e8d0;
@@ -792,6 +908,7 @@ function saveNotes() {
 }
 
 /* TIMESTAMPS */
+
 .stage-info {
   display: flex;
   flex-direction: column;
@@ -817,6 +934,7 @@ function saveNotes() {
 }
 
 /* NOTES */
+
 .notes-section {
   padding: 0 1px;
 }
@@ -894,6 +1012,7 @@ function saveNotes() {
 }
 
 /* SAVE NOTES SUCCESS */
+
 .save-success {
   display: flex;
   flex-direction: column;
@@ -916,6 +1035,7 @@ function saveNotes() {
 }
 
 /* MODAL */
+
 .modal-overlay {
   position: fixed;
   z-index: 1000;
@@ -956,6 +1076,18 @@ function saveNotes() {
   color: #51090e;
   font-size: 31px;
   font-weight: 700;
+}
+
+/* NEW: GREEN USER CHECK ICON FOR CHECK IN */
+
+.warning-icon.check-in-icon {
+  background: #e1f0e5;
+  color: #287a4b;
+}
+
+.check-in-icon svg {
+  display: block;
+  flex-shrink: 0;
 }
 
 .modal-heading h2 {
@@ -1026,6 +1158,7 @@ function saveNotes() {
 }
 
 /* RESPONSIVE */
+
 @media (max-width: 700px) {
   .guidance-details {
     padding: 20px 14px;

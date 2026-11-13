@@ -14,6 +14,18 @@ const props = defineProps({
   searchText: {
     type: String,
     default: ''
+  },
+  refreshing: {
+    type: Boolean,
+    default: false
+  },
+  refreshMessage: {
+    type: String,
+    default: ''
+  },
+  refreshStatus: {
+    type: String,
+    default: ''
   }
 })
 
@@ -21,14 +33,14 @@ const emit = defineEmits([
   'update:active-filter',
   'update:search-text',
   'action',
-  'reschedule'
+  'reschedule',
+  'refresh'
 ])
 
 const filters = [
   'All',
   'Pending',
   'Confirmed',
-  'Ready for Pickup',
   'Completed',
   'Cancelled',
   'No-show'
@@ -48,6 +60,11 @@ function selectFilter(filter) {
   emit('update:active-filter', filter)
 }
 
+function handleRefresh() {
+  if (props.refreshing) return
+  emit('refresh')
+}
+
 function formatDate(date, time) {
   if (!date) return ''
 
@@ -61,7 +78,6 @@ function formatDate(date, time) {
 
   if (!time) return dateText
 
-  // Accept both "10:30" and "10:30 AM" formats.
   const timeText = String(time).trim()
 
   if (/AM|PM/i.test(timeText)) {
@@ -82,25 +98,31 @@ function formatDate(date, time) {
 }
 
 function normalizeStatus(status) {
-  const value = String(status || '').trim().toLowerCase()
+  const value = String(status || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, ' ')
 
   const statusMap = {
     pending: 'Pending',
     confirmed: 'Confirmed',
-    reschedule_requested: 'Reschedule Requested',
     'reschedule requested': 'Reschedule Requested',
     completed: 'Completed',
     cancelled: 'Cancelled',
     rejected: 'Rejected',
-    no_show: 'No-show',
-    'no-show': 'No-show'
+    'no show': 'No-show'
   }
 
   return statusMap[value] || status || 'Pending'
 }
-
 const visibleAppointments = computed(() => {
-  const search = String(props.searchText || '').trim().toLowerCase()
+  const search = String(props.searchText || '')
+    .trim()
+    .toLowerCase()
+
+  const selected = String(selectedFilter.value || 'All')
+    .trim()
+    .toLowerCase()
 
   return props.appointments
     .map(appointment => ({
@@ -109,12 +131,8 @@ const visibleAppointments = computed(() => {
     }))
     .filter(appointment => {
       const matchesFilter =
-        selectedFilter.value === 'All' ||
-        (
-          selectedFilter.value === 'Ready for Pickup'
-            ? appointment.status === 'Reschedule Requested'
-            : appointment.status === selectedFilter.value
-        )
+        selected === 'all' ||
+        appointment.status.toLowerCase() === selected
 
       const searchableText = [
         appointment.student,
@@ -163,7 +181,10 @@ function handleAction(appointment, action) {
       <p>Confirm, reschedule and complete Guidance Appointments</p>
     </header>
 
-    <nav class="filter-list" aria-label="Appointment status filters">
+    <nav
+      class="filter-list"
+      aria-label="Appointment status filters"
+    >
       <button
         v-for="filter in filters"
         :key="filter"
@@ -175,9 +196,41 @@ function handleAction(appointment, action) {
       >
         {{ filter }}
       </button>
+
     </nav>
 
-    <div v-if="visibleAppointments.length" class="appointment-list">
+    <!-- REFRESH FEEDBACK -->
+    <p
+      v-if="refreshing"
+      class="refresh-feedback loading"
+      role="status"
+      aria-live="polite"
+    >
+      Refreshing appointments...
+    </p>
+
+    <p
+      v-else-if="refreshStatus === 'success'"
+      class="refresh-feedback success"
+      role="status"
+      aria-live="polite"
+    >
+      ✓ Appointments updated just now.
+    </p>
+
+    <p
+      v-else-if="refreshStatus === 'error' && refreshMessage"
+      class="refresh-feedback error"
+      role="alert"
+    >
+      ⚠ {{ refreshMessage }}
+    </p>
+
+    <!-- APPOINTMENT LIST -->
+    <div
+      v-if="visibleAppointments.length"
+      class="appointment-list"
+    >
       <article
         v-for="appointment in visibleAppointments"
         :key="appointment.id"
@@ -202,7 +255,10 @@ function handleAction(appointment, action) {
           {{ appointment.type || 'Guidance Appointment' }}
         </h2>
 
-        <p v-if="appointment.studentId" class="appointment-detail">
+        <p
+          v-if="appointment.studentId"
+          class="appointment-detail"
+        >
           Student ID: {{ appointment.studentId }}
         </p>
 
@@ -210,7 +266,10 @@ function handleAction(appointment, action) {
           {{ appointment.reference || appointment.id }}
         </p>
 
-        <p v-if="appointment.purpose" class="appointment-purpose">
+        <p
+          v-if="appointment.purpose"
+          class="appointment-purpose"
+        >
           <strong>Purpose:</strong> {{ appointment.purpose }}
         </p>
 
@@ -263,6 +322,7 @@ function handleAction(appointment, action) {
       </article>
     </div>
 
+    <!-- EMPTY STATE -->
     <div v-else class="empty-state">
       <h2>No appointments found</h2>
       <p>
@@ -329,6 +389,78 @@ function handleAction(appointment, action) {
   color: #fffafa;
   background: #650f18;
   border-color: #650f18;
+}
+
+/* REFRESH BUTTON */
+.refresh-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 110px;
+  height: 39px;
+  padding: 0 16px;
+  margin-left: auto;
+  color: #650f18;
+  background: #f8eeee;
+  border: 1px solid #85474b;
+  border-radius: 9px;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.refresh-button:hover:not(:disabled) {
+  background: #ead5d6;
+}
+
+.refresh-button:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.refresh-icon {
+  flex-shrink: 0;
+}
+
+.refresh-icon.spinning {
+  animation: refresh-spin 0.8s linear infinite;
+}
+
+@keyframes refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* REFRESH FEEDBACK */
+.refresh-feedback {
+  margin: -8px 0 16px;
+  padding: 10px 13px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.refresh-feedback.loading {
+  color: #650f18;
+  background: #f5e6e7;
+  border: 1px solid #d7b9bb;
+}
+
+.refresh-feedback.success {
+  color: #356344;
+  background: #e5f3e9;
+  border: 1px solid #bce2ca;
+}
+
+.refresh-feedback.error {
+  color: #b42332;
+  background: #fce8e8;
+  border: 1px solid #e5b2b5;
 }
 
 .appointment-list {
@@ -496,6 +628,12 @@ function handleAction(appointment, action) {
     font-size: 12px;
   }
 
+  .refresh-button {
+    height: 36px;
+    padding: 0 12px;
+    font-size: 12px;
+  }
+
   .appointment-card {
     padding: 13px;
   }
@@ -525,6 +663,10 @@ function handleAction(appointment, action) {
 
   .action-button {
     flex: 1 1 calc(50% - 7px);
+  }
+
+  .refresh-button {
+    margin-left: auto;
   }
 }
 </style>

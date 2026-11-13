@@ -1,6 +1,6 @@
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch, onMounted } from 'vue'
 
 import AppHeader from './components/AppHeader.vue'
 import AppSidebar from './components/AppSidebar.vue'
@@ -20,11 +20,20 @@ import NotificationsView from './views/NotificationsView.vue'
 
 const API_BASE_URL = 'http://localhost:3000'
 
+const savedSession = sessionStorage.getItem('guidanceSession')
+
 const isLoggedIn = ref(false)
 const currentUser = ref(null)
 const accessToken = ref('')
+const isCheckingSession = ref(true)
 
-const activePage = ref('Dashboard')
+const activePage = ref(
+  sessionStorage.getItem('guidanceActivePage') || 'Dashboard'
+)
+
+watch(activePage, (page) => {
+  sessionStorage.setItem('guidanceActivePage', page)
+})
 const activeFilter = ref('All')
 const searchText = ref('')
 
@@ -38,6 +47,8 @@ const notesSaving = ref(false)
 const notesSaveResult = ref(null)
 
 const showLogoutDialog = ref(false)
+const showSessionSuccess = ref(false)
+const sessionSuccessMessage = ref('')
 
 const appointments = ref([])
 const historyRecords = ref([])
@@ -74,25 +85,26 @@ const completedCount = computed(() =>
   ).length
 )
 
+
 // READY FOR PICKUP FILTER SUPPORT
 const visibleAppointments = computed(() => {
   const search = searchText.value.trim().toLowerCase()
 
-  return appointments.value.filter(item => {
-    const status = String(item.status || '')
+  const normalizeStatus = (value) =>
+    String(value || '')
       .trim()
       .toLowerCase()
-      .replace(/[_-]+/g, ' ')
+      .replace(/[\s_-]+/g, '')
 
-    const selected = String(activeFilter.value || 'All')
-      .trim()
-      .toLowerCase()
+  return appointments.value.filter(item => {
+    const status = normalizeStatus(item.status)
+    const selected = normalizeStatus(activeFilter.value)
 
     const matchesFilter =
       selected === 'all' ||
       (
-        selected === 'ready for pickup'
-          ? status === 'reschedule requested'
+        selected === 'readyforpickup'
+          ? status === 'reschedulerequested'
           : status === selected
       )
 
@@ -104,6 +116,7 @@ const visibleAppointments = computed(() => {
     return matchesFilter && matchesSearch
   })
 })
+
 
 const historyAppointments = computed(() => {
   const search = searchText.value.trim().toLowerCase()
@@ -243,21 +256,30 @@ function handleLogin(payload) {
   const token = payload?.session?.access_token
 
   if (!token) {
-    alert(
-      'Login did not return an authentication token. Please sign in again.'
-    )
+    alert('Login did not return an authentication token. Please sign in again.')
     return
   }
 
   accessToken.value = token
   currentUser.value = payload.user || null
-
   isLoggedIn.value = true
+
+  const storage = payload.keepSignedIn
+    ? localStorage
+    : sessionStorage
+
+  localStorage.removeItem('guidanceSession')
+  sessionStorage.removeItem('guidanceSession')
+
+  storage.setItem('guidanceSession', JSON.stringify({
+    user: payload.user,
+    session: payload.session
+  }))
+
   activePage.value = 'Dashboard'
   activeFilter.value = 'All'
   searchText.value = ''
 
-  // Load in background to keep login fast
   Promise.allSettled([
     loadAppointments(),
     loadHistory(),
@@ -374,14 +396,34 @@ async function updateGuidanceSession(payload) {
       }
     )
 
-    await loadAppointments()
+  await loadAppointments()
 
-    selectedGuidanceSession.value =
-      guidanceSessions.value.find(
-        item => item.id === appointmentId
-      ) || null
+selectedGuidanceSession.value =
+  guidanceSessions.value.find(
+    item => String(item.id) === String(appointmentId)
+  ) || selectedGuidanceSession.value
 
-    alert('Session status updated successfully.')
+    const action = String(payload.action || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[\s_-]+/g, '')
+
+    if (action === 'checkin') {
+      sessionSuccessMessage.value =
+        'Student checked in successfully!'
+    } else if (action === 'startsession' || action === 'start') {
+      sessionSuccessMessage.value =
+        'Guidance session started successfully!'
+    } else if (action === 'completesession' || action === 'complete') {
+      sessionSuccessMessage.value =
+        'Guidance session completed successfully!'
+    } else {
+      sessionSuccessMessage.value =
+        'Session status updated successfully.'
+    }
+
+    showSessionSuccess.value = true
+
   } catch (error) {
     console.error('UPDATE SESSION ERROR:', error)
 
@@ -390,6 +432,78 @@ async function updateGuidanceSession(payload) {
     )
   }
 }
+async function restoreSession() {
+  try {
+    const stored =
+      localStorage.getItem('guidanceSession') ||
+      sessionStorage.getItem('guidanceSession');
+
+    if (!stored) return;
+
+    const saved = JSON.parse(stored);
+
+    if (!saved?.session?.refresh_token) {
+      throw new Error('Missing refresh token');
+    }
+
+    const response = await fetch(
+      `${API_BASE_URL}/api/auth/guidance-refresh`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          refresh_token: saved.session.refresh_token
+        })
+      }
+    );
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      if (response.status === 401 || response.status === 403) {
+        localStorage.removeItem('guidanceSession');
+        sessionStorage.removeItem('guidanceSession');
+        sessionStorage.removeItem('guidanceActivePage');
+      }
+
+      return;
+    }
+
+    const storage = localStorage.getItem('guidanceSession')
+      ? localStorage
+      : sessionStorage;
+
+    storage.setItem('guidanceSession', JSON.stringify({
+      user: result.user,
+      session: result.session
+    }));
+
+    accessToken.value = result.session.access_token;
+    currentUser.value = result.user;
+    isLoggedIn.value = true;
+
+    // Keep the previous page instead of resetting to Dashboard.
+    activePage.value =
+      sessionStorage.getItem('guidanceActivePage') || 'Dashboard';
+
+    await Promise.allSettled([
+      loadAppointments(),
+      loadHistory(),
+      loadDashboardSummary()
+    ]);
+
+  } catch (error) {
+    console.error('SESSION RESTORE ERROR:', error);
+  } finally {
+    isCheckingSession.value = false;
+  }
+}
+
+onMounted(() => {
+  restoreSession()
+})
 
 // ========================================
 // SAVE GUIDANCE NOTES
@@ -630,6 +744,7 @@ function cancelLogout() {
   showLogoutDialog.value = false
 }
 
+
 function confirmLogout() {
   showLogoutDialog.value = false
 
@@ -648,16 +763,22 @@ function confirmLogout() {
   activePage.value = 'Dashboard'
   activeFilter.value = 'All'
   searchText.value = ''
+
+  // Clear saved login session and page
+  localStorage.removeItem('guidanceSession')
+  sessionStorage.removeItem('guidanceSession')
+  sessionStorage.removeItem('guidanceActivePage')
 }
+
 </script>
 
 <template>
   <LoginView
-    v-if="!isLoggedIn"
-    @login="handleLogin"
-  />
+  v-if="!isCheckingSession && !isLoggedIn"
+  @login="handleLogin"
+/>
 
-  <div v-else class="app-shell">
+<div v-else-if="isLoggedIn" class="app-shell">
     <AppHeader
       :staff-name="currentUser?.full_name || 'Guidance Staff'"
     />
@@ -670,15 +791,14 @@ function confirmLogout() {
       />
 
       <main class="main-content">
-        <DashboardView
-          v-if="activePage === 'Dashboard'"
-          :appointments="todayAppointments"
-          :recent-appointments="appointments"
-          :completed-count="completedCount"
-          :counselors-available="dashboardSummary.counselorsAvailable"
-          :ready-for-pickup="dashboardSummary.readyForPickup"
-          @navigate="navigate"
-        />
+      <DashboardView
+  v-if="activePage === 'Dashboard'"
+  :appointments="todayAppointments"
+  :recent-appointments="appointments"
+  :completed-count="completedCount"
+  :counselors-available="dashboardSummary.counselorsAvailable"
+  @navigate="navigate"
+/>
 
         <AppointmentsView
           v-else-if="activePage === 'Appointments'"
@@ -793,15 +913,16 @@ function confirmLogout() {
       </main>
     </div>
 
-    <ConfirmDialog
-      :visible="showDialog"
-      :title="dialogTitle"
-      :message="dialogMessage"
-      :confirm-text="dialogConfirmText"
-      :danger="['Cancel', 'No-show'].includes(dialogAction)"
-      @confirm="confirmAction"
-      @close="showDialog = false"
-    />
+   <ConfirmDialog
+  :visible="showDialog"
+  :title="dialogTitle"
+  :message="dialogMessage"
+  :confirm-text="dialogConfirmText"
+  :danger="['Cancel', 'No-show'].includes(dialogAction)"
+  :action="dialogAction"
+  @confirm="confirmAction"
+  @close="showDialog = false"
+/>
 
     <Teleport to="body">
       <div
@@ -852,6 +973,54 @@ function confirmLogout() {
         </section>
       </div>
     </Teleport>
+    <!-- GUIDANCE SESSION SUCCESS POPUP -->
+<Teleport to="body">
+  <div
+    v-if="showSessionSuccess"
+    class="session-success-overlay"
+  >
+    <section
+      class="session-success-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="session-success-title"
+    >
+      <div class="session-success-heading">
+        <div class="session-success-icon">
+          <svg
+            width="28"
+            height="28"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <path d="m7 12 3 3 7-7" />
+          </svg>
+        </div>
+
+        <h2 id="session-success-title">
+          Success!
+        </h2>
+      </div>
+
+      <p>{{ sessionSuccessMessage }}</p>
+
+      <div class="session-success-actions">
+        <button
+          type="button"
+          @click="showSessionSuccess = false"
+        >
+          OK
+        </button>
+      </div>
+    </section>
+  </div>
+</Teleport>
   </div>
 </template>
 
@@ -1271,5 +1440,76 @@ button:disabled {
     min-width: 0;
     flex: 1;
   }
+}
+/* GUIDANCE SESSION SUCCESS POPUP */
+
+.session-success-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(29, 15, 16, 0.42);
+}
+
+.session-success-modal {
+  width: 100%;
+  max-width: 410px;
+  padding: 24px;
+  border-radius: 15px;
+  background: #fffafa;
+  box-shadow: 0 14px 42px rgba(31, 5, 7, 0.18);
+  color: #300608;
+}
+
+.session-success-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.session-success-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  background: #e1f0e5;
+  color: #287a4b;
+}
+
+.session-success-heading h2 {
+  margin: 0;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 25px;
+  font-weight: 500;
+}
+
+.session-success-modal p {
+  margin: 18px 0;
+  font-size: 14px;
+}
+
+.session-success-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.session-success-actions button {
+  padding: 10px 27px;
+  border: none;
+  border-radius: 9px;
+  background: #51090e;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.session-success-actions button:hover {
+  background: #390609;
 }
 </style>
