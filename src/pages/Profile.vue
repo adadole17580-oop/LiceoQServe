@@ -24,7 +24,6 @@ const profile = ref({
 
 const initials = ref('')
 
-// GET INITIALS
 function getInitials(name) {
   if (!name) return 'NA'
 
@@ -36,7 +35,6 @@ function getInitials(name) {
     .join('')
 }
 
-// FORMAT ROLE
 function formatRole(role) {
   if (!role) return 'Not assigned'
 
@@ -45,7 +43,6 @@ function formatRole(role) {
     .replace(/\b\w/g, letter => letter.toUpperCase())
 }
 
-// FETCH PROFILE FROM SUPABASE
 async function fetchProfile() {
   loading.value = true
   errorMessage.value = ''
@@ -112,8 +109,7 @@ async function fetchProfile() {
   }
 }
 
-// CHANGE PASSWORD THROUGH SUPABASE AUTH
-async function updatePassword() {
+  async function updatePassword() {
   passwordMessage.value = ''
 
   if (
@@ -144,7 +140,6 @@ async function updatePassword() {
   passwordLoading.value = true
 
   try {
-    // GET CURRENT LOGGED-IN USER
     const { data: authData, error: authError } =
       await supabase.auth.getUser()
 
@@ -156,7 +151,6 @@ async function updatePassword() {
       throw new Error('Unable to identify your account.')
     }
 
-    // VERIFY CURRENT PASSWORD
     const { error: verifyError } =
       await supabase.auth.signInWithPassword({
         email: user.email,
@@ -168,7 +162,6 @@ async function updatePassword() {
       return
     }
 
-    // UPDATE PASSWORD IN SUPABASE AUTHENTICATION
     const { error: updateError } =
       await supabase.auth.updateUser({
         password: newPassword.value
@@ -191,8 +184,7 @@ async function updatePassword() {
   }
 }
 
-// CANCEL PASSWORD CHANGE
-function cancelPasswordChange() {
+  function cancelPasswordChange() {
   showPasswordForm.value = false
   passwordMessage.value = ''
   currentPassword.value = ''
@@ -209,7 +201,6 @@ onMounted(() => {
   <section class="profile-page">
     <div class="profile-content">
 
-      <!-- PAGE HEADING -->
       <header class="profile-heading">
         <h1>STAFF PROFILE</h1>
         <p>
@@ -217,17 +208,14 @@ onMounted(() => {
         </p>
       </header>
 
-      <!-- LOADING -->
       <p v-if="loading" class="loading-message">
         Loading staff profile...
       </p>
 
-      <!-- ERROR -->
       <p v-if="errorMessage" class="error-message">
         {{ errorMessage }}
       </p>
 
-      <!-- PROFILE CARD -->
       <article
         v-if="!loading && !errorMessage"
         class="profile-card"
@@ -247,7 +235,6 @@ onMounted(() => {
 
         <div class="profile-card-body">
 
-          <!-- PROFILE DETAILS -->
           <div class="profile-details">
 
             <div class="detail-item">
@@ -280,7 +267,6 @@ onMounted(() => {
 
           </div>
 
-          <!-- CHANGE PASSWORD BUTTON -->
           <button
             v-if="!showPasswordForm"
             class="password-toggle"
@@ -290,7 +276,6 @@ onMounted(() => {
             Change Password
           </button>
 
-          <!-- CHANGE PASSWORD FORM -->
           <form
             v-else
             class="password-form"
@@ -339,7 +324,6 @@ onMounted(() => {
               required
             />
 
-            <!-- PASSWORD MESSAGE -->
             <p
               v-if="passwordMessage"
               class="password-message"
@@ -351,7 +335,6 @@ onMounted(() => {
               {{ passwordMessage }}
             </p>
 
-            <!-- ACTION BUTTONS -->
             <div class="password-actions">
 
               <button
@@ -400,7 +383,6 @@ onMounted(() => {
   margin: 0 auto;
 }
 
-/* HEADING */
 .profile-heading {
   width: 100%;
   margin: 0 0 14px;
@@ -428,7 +410,6 @@ onMounted(() => {
   font-weight: 500;
 }
 
-/* PROFILE CARD */
 .profile-card {
   width: 100%;
   margin: 0;
@@ -476,7 +457,6 @@ onMounted(() => {
   line-height: 1.5;
 }
 
-/* PROFILE DETAILS */
 .profile-card-body {
   padding: 18px 20px;
 }
@@ -516,7 +496,6 @@ onMounted(() => {
   color: #a21c28 !important;
 }
 
-/* PASSWORD BUTTONS */
 .password-toggle,
 .cancel-button {
   min-height: 36px;
@@ -542,7 +521,6 @@ onMounted(() => {
   cursor: not-allowed;
 }
 
-/* PASSWORD FORM */
 .password-form {
   display: flex;
   width: 100%;
@@ -602,7 +580,6 @@ onMounted(() => {
   color: #28743a;
 }
 
-/* LOADING AND ERROR */
 .loading-message,
 .error-message {
   margin: 10px 0;
@@ -618,7 +595,6 @@ onMounted(() => {
   color: #a21c28;
 }
 
-/* RESPONSIVE */
 @media (max-width: 600px) {
   .profile-page {
     padding: 10px;
