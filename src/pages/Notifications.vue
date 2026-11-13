@@ -2,13 +2,11 @@
 <template>
   <section class="notifications-page">
 
-    <!-- PAGE HEADING -->
     <div class="page-heading">
       <h1>NOTIFICATIONS</h1>
       <p>Select a notification to open its related transaction.</p>
     </div>
 
-    <!-- TOOLBAR -->
     <div class="notification-toolbar">
 
       <div class="filter-group">
@@ -40,12 +38,10 @@
 
     </div>
 
-    <!-- LOADING -->
     <div v-if="loading" class="state-message">
       Loading notifications...
     </div>
 
-    <!-- ERROR -->
     <div v-else-if="errorMessage" class="error-message">
       {{ errorMessage }}
 
@@ -57,7 +53,6 @@
       </button>
     </div>
 
-    <!-- NOTIFICATION LIST -->
     <div v-else class="notification-list">
 
       <article
@@ -106,7 +101,6 @@
 
       </article>
 
-      <!-- EMPTY STATE -->
       <div
         v-if="filteredNotifications.length === 0"
         class="empty-state"
@@ -126,7 +120,6 @@
 
     </div>
 
-    <!-- FOOTER -->
     <div class="notifications-footer">
       Showing {{ filteredNotifications.length }} notification(s)
     </div>
@@ -142,27 +135,13 @@ import {
   onBeforeUnmount
 } from 'vue'
 
-import { supabase } from '../lib/Supabase.js'
-
-// =====================================================
-// EMITS
-// =====================================================
-
+import { supabase } from '../lib/Supabase.js' 
 const emit = defineEmits(['navigate'])
-
-// =====================================================
-// OSA SERVICE IDS
-// =====================================================
-
 const OSA_SERVICE_IDS = [
   '5c2ab6fc-5f24-4573-896a-f5a11ad6625e',
   '65a94572-bce2-460f-b3e8-2ed568ee7bbf',
   'e5121b34-a6d2-4370-a023-5153a73c97f8'
 ]
-
-// =====================================================
-// STATE
-// =====================================================
 
 const notifications = ref([])
 
@@ -182,10 +161,6 @@ const filters = ['All', 'Unread', 'Read']
 let notificationChannel = null
 let requestChannel = null
 let appointmentChannel = null
-
-// =====================================================
-// COMPUTED
-// =====================================================
 
 const unreadCount = computed(() => {
   return notifications.value.filter(
@@ -209,10 +184,6 @@ const filteredNotifications = computed(() => {
   return notifications.value
 })
 
-// =====================================================
-// FETCH NOTIFICATION RECORDS
-// =====================================================
-
 async function loadNotificationRecords(userId) {
   const { data, error } = await supabase
     .from('notifications')
@@ -234,17 +205,12 @@ async function loadNotificationRecords(userId) {
   notifications.value = data || []
 }
 
-// =====================================================
-// CREATE MISSING APPOINTMENT NOTIFICATIONS
-// =====================================================
-
 async function syncAppointmentNotifications(userId) {
   if (syncingAppointments.value) return
 
   syncingAppointments.value = true
 
   try {
-    // Fetch all pending OSA appointments.
     const { data: appointments, error: appointmentError } =
       await supabase
         .from('appointments')
@@ -271,8 +237,7 @@ async function syncAppointmentNotifications(userId) {
     const appointmentIds = appointments.map(
       appointment => appointment.id
     )
-
-    // Find existing appointment notifications.
+    
     const { data: existingNotifications, error: existingError } =
       await supabase
         .from('notifications')
@@ -289,7 +254,6 @@ async function syncAppointmentNotifications(userId) {
       )
     )
 
-    // Identify appointments without notifications.
     const missingNotifications = appointments
       .filter(
         appointment => !existingIds.has(appointment.id)
@@ -335,7 +299,6 @@ async function syncAppointmentNotifications(userId) {
       return
     }
 
-    // Insert missing appointment notifications.
     const { data: inserted, error: insertError } =
       await supabase
         .from('notifications')
@@ -361,10 +324,6 @@ async function syncAppointmentNotifications(userId) {
     syncingAppointments.value = false
   }
 }
-
-// =====================================================
-// CREATE MISSING REQUEST NOTIFICATIONS
-// =====================================================
 
 async function syncRequestNotifications(userId) {
   if (syncingRequests.value) return
@@ -457,11 +416,7 @@ async function syncRequestNotifications(userId) {
     syncingRequests.value = false
   }
 }
-
-// =====================================================
-// FETCH AND SYNCHRONIZE ALL NOTIFICATIONS
-// =====================================================
-
+  
 async function fetchNotifications() {
   loading.value = true
   errorMessage.value = ''
@@ -485,17 +440,10 @@ async function fetchNotifications() {
     }
 
     currentUserId.value = user.id
-
-    // First load existing notifications.
+    
     await loadNotificationRecords(user.id)
-
-    // Synchronize missing appointment notifications.
     await syncAppointmentNotifications(user.id)
-
-    // Synchronize missing request notifications.
     await syncRequestNotifications(user.id)
-
-    // Reload to display newly inserted notifications.
     await loadNotificationRecords(user.id)
 
   } catch (error) {
@@ -511,11 +459,7 @@ async function fetchNotifications() {
     loading.value = false
   }
 }
-
-// =====================================================
-// MARK ONE NOTIFICATION AS READ
-// =====================================================
-
+  
 async function markAsRead(notification) {
   if (notification.is_read) return true
 
@@ -548,10 +492,6 @@ async function markAsRead(notification) {
     return false
   }
 }
-
-// =====================================================
-// MARK ALL NOTIFICATIONS AS READ
-// =====================================================
 
 async function markAllAsRead() {
   if (!currentUserId.value || unreadCount.value === 0) {
@@ -593,10 +533,6 @@ async function markAllAsRead() {
   }
 }
 
-// =====================================================
-// DETERMINE TARGET PAGE
-// =====================================================
-
 function getTargetPage(category) {
   const value = String(category || '').toLowerCase()
 
@@ -618,10 +554,6 @@ function getTargetPage(category) {
   return 'Request'
 }
 
-// =====================================================
-// OPEN NOTIFICATION
-// =====================================================
-
 async function openNotification(notification) {
   if (openingId.value) return
 
@@ -641,10 +573,6 @@ async function openNotification(notification) {
   openingId.value = null
 }
 
-// =====================================================
-// FORMAT DATE
-// =====================================================
-
 function formatDate(dateValue) {
   if (!dateValue) return 'Date unavailable'
 
@@ -663,10 +591,6 @@ function formatDate(dateValue) {
     timeZone: 'Asia/Manila'
   })
 }
-
-// =====================================================
-// NOTIFICATION REALTIME
-// =====================================================
 
 function subscribeToNotifications() {
   if (!currentUserId.value) return
@@ -703,10 +627,6 @@ function subscribeToNotifications() {
       )
     })
 }
-
-// =====================================================
-// SERVICE REQUEST REALTIME
-// =====================================================
 
 function subscribeToRequests() {
   if (requestChannel) {
@@ -748,10 +668,6 @@ function subscribeToRequests() {
     })
 }
 
-// =====================================================
-// APPOINTMENT REALTIME FALLBACK
-// =====================================================
-
 function subscribeToAppointments() {
   if (appointmentChannel) {
     supabase.removeChannel(appointmentChannel)
@@ -780,8 +696,6 @@ function subscribeToAppointments() {
           appointment
         )
 
-        // App.vue creates the notification.
-        // Here we only reload the notification records.
         await fetchNotifications()
       }
     )
@@ -794,10 +708,6 @@ function subscribeToAppointments() {
     })
 }
 
-// =====================================================
-// INITIALIZATION
-// =====================================================
-
 onMounted(async () => {
   await fetchNotifications()
 
@@ -807,10 +717,6 @@ onMounted(async () => {
     subscribeToAppointments()
   }
 })
-
-// =====================================================
-// CLEANUP
-// =====================================================
 
 onBeforeUnmount(() => {
   if (notificationChannel) {
