@@ -1,7 +1,9 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 import { supabase } from '../lib/supabase.js'
+import { apiRequest } from '../lib/api.js'
 import { useStudentDataSync } from '../composables/useStudentDataSync.js'
 import '../assets/styles/appointments.css'
 
@@ -9,13 +11,20 @@ const route = useRoute()
 const activeTab = ref('All')
 const showForm = ref(false)
 const showConfirm = ref(false)
+const pendingConfirmation = ref(null)
 const notice = ref('')
 const loading = ref(true)
 const loadError = ref('')
 const submitting = ref(false)
+const actionSubmitting = ref(false)
 const appointments = ref([])
 const reservations = ref([])
 const rooms = ref([])
+const roomAvailabilityIds = ref(null)
+const roomAvailabilityKey = ref('')
+const roomAvailabilityError = ref('')
+const roomAvailabilityLoading = ref(false)
+let roomAvailabilityRequestId = 0
 const books = ref([])
 const services = ref([])
 const libraryTab = ref('Consultation / Assistance')
@@ -60,7 +69,12 @@ const availableRooms = computed(() => rooms.value.filter((room) => {
   const type = `${room.room_type || ''} ${room.name || ''}`.toLowerCase()
   if (roomForm.value.type.toLowerCase().includes('view')) return type.includes('view')
   if (roomForm.value.type.toLowerCase().includes('discussion')) return type.includes('discussion')
-  return true
+  const slot = `${roomForm.value.date}|${roomForm.value.startTime}|${roomForm.value.endTime}`
+  if (roomForm.value.date && roomForm.value.startTime && roomForm.value.endTime) {
+    return roomAvailabilityKey.value === slot &&
+      roomAvailabilityIds.value?.has(room.id) === true
+  }
+  return room.is_available
 }))
 const selectedService = computed(() => availableServices.value.find(
   (service) => service.id === form.value.serviceId,
@@ -101,25 +115,6 @@ const filteredBookings = computed(() => bookingRecords.value.filter((item) => (
       item.status === activeTab.value
     ))
 )))
-
-const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000'
-
-async function apiRequest(path, options = {}) {
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session?.access_token) throw new Error('Your session has expired. Please sign in again.')
-
-  const response = await fetch(`${apiBase}${path}`, {
-    ...options,
-    headers: {
-      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-      Authorization: `Bearer ${session.access_token}`,
-      ...options.headers,
-    },
-  })
-  const payload = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(payload.error || 'The request could not be completed.')
-  return payload
-}
 
 function localDateTimeParts(value) {
   const date = new Date(value)
@@ -164,9 +159,18 @@ function mapReservation(item) {
   const room = item.rooms || {}
   return {
     ...item,
-    roomName: room.name || 'Library room',
+    roomName: room.name || item.resource_name || 'Library room',
     service: item.office_services?.name || `${room.room_type || 'Library Room'} Reservation`,
   }
+}
+
+function isGuidanceAppointment(booking) {
+  return booking.recordType === 'appointment' &&
+    String(booking.office || '').trim().toLowerCase() === 'guidance'
+}
+
+function isConfirmedGuidanceAppointment(booking) {
+  return isGuidanceAppointment(booking) && booking.status === 'confirmed'
 }
 
 async function fetchServices() {
@@ -206,6 +210,68 @@ async function loadData() {
   }
 }
 
+async function refreshRoomAvailability() {
+  const { date, startTime, endTime } = roomForm.value
+  const requestId = ++roomAvailabilityRequestId
+  roomAvailabilityLoading.value = false
+  roomAvailabilityError.value = ''
+
+  if (!date || !startTime || !endTime) {
+    roomAvailabilityKey.value = ''
+    roomAvailabilityIds.value = null
+    roomAvailabilityLoading.value = false
+    return
+  }
+
+  const slot = `${date}|${startTime}|${endTime}`
+  roomAvailabilityKey.value = slot
+  roomAvailabilityIds.value = null
+  const startAt = new Date(`${date}T${startTime}:00`)
+  const endAt = new Date(`${date}T${endTime}:00`)
+  if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime()) || startAt <= new Date()) {
+    roomAvailabilityError.value = 'Choose a valid reservation date and time in the future.'
+    roomAvailabilityIds.value = new Set()
+    return
+  }
+  if (startAt >= endAt) {
+    roomAvailabilityError.value = 'The end time must be later than the start time.'
+    roomAvailabilityIds.value = new Set()
+    return
+  }
+
+  roomAvailabilityLoading.value = true
+  try {
+    const query = new URLSearchParams({
+      startAt: startAt.toISOString(),
+      endAt: endAt.toISOString(),
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    })
+    const payload = await apiRequest(`/api/reservations/rooms?${query}`)
+    if (requestId !== roomAvailabilityRequestId) return
+
+    roomAvailabilityIds.value = new Set((payload.rooms || []).map((room) => room.id))
+    if (roomForm.value.roomId && !roomAvailabilityIds.value.has(roomForm.value.roomId)) {
+      roomForm.value.roomId = ''
+    }
+  } catch (error) {
+    if (requestId !== roomAvailabilityRequestId) return
+    console.error('Error checking Library room availability:', error)
+    roomAvailabilityError.value = error.message || 'Could not check room availability.'
+    roomAvailabilityIds.value = new Set()
+  } finally {
+    if (requestId === roomAvailabilityRequestId) {
+      roomAvailabilityLoading.value = false
+    }
+  }
+}
+
+watch(
+  () => [roomForm.value.date, roomForm.value.startTime, roomForm.value.endTime],
+  () => {
+    void refreshRoomAvailability()
+  },
+)
+
 function openNewAppointment() {
   editingAppointment.value = null
   form.value = {
@@ -228,6 +294,7 @@ function openNewAppointment() {
   selectedBook.value = ''
   showForm.value = true
   showConfirm.value = false
+  pendingConfirmation.value = null
   notice.value = ''
 }
 
@@ -239,8 +306,11 @@ function openRoomReservation() {
 }
 
 function closeForm() {
+  roomAvailabilityRequestId += 1
+  roomAvailabilityLoading.value = false
   showForm.value = false
   showConfirm.value = false
+  pendingConfirmation.value = null
   editingAppointment.value = null
 }
 
@@ -298,7 +368,7 @@ async function confirmAppointment() {
   }
 }
 
-async function submitRoomReservation() {
+function requestRoomReservationConfirmation() {
   if (!roomForm.value.roomId || !roomForm.value.date || !roomForm.value.startTime ||
       !roomForm.value.endTime || !roomForm.value.purpose.trim()) {
     notice.value = 'Please complete all room reservation fields.'
@@ -307,67 +377,165 @@ async function submitRoomReservation() {
 
   const startAt = new Date(`${roomForm.value.date}T${roomForm.value.startTime}:00`)
   const endAt = new Date(`${roomForm.value.date}T${roomForm.value.endTime}:00`)
+  if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime()) || startAt <= new Date()) {
+    notice.value = 'Please choose a valid reservation date and time in the future.'
+    return
+  }
   if (startAt >= endAt) {
     notice.value = 'The end time must be later than the start time.'
     return
   }
 
   const room = rooms.value.find((item) => item.id === roomForm.value.roomId)
-  if (!window.confirm(`Submit ${roomForm.value.type.toLowerCase()} for ${room?.name || 'the selected room'} on ${formatDate(roomForm.value.date)}?`)) {
+  if (!room?.is_available) {
+    notice.value = 'The selected room is no longer available. Choose another room.'
+    return
+  }
+  const slot = `${roomForm.value.date}|${roomForm.value.startTime}|${roomForm.value.endTime}`
+  if (
+    roomAvailabilityKey.value !== slot ||
+    !roomAvailabilityIds.value?.has(room.id)
+  ) {
+    notice.value = 'Check room availability for the selected date and time before submitting.'
     return
   }
 
+  pendingConfirmation.value = {
+    type: 'room',
+    title: 'Confirm Room Reservation',
+    message: `Are you sure you want to reserve ${room.name} on ${formatDate(roomForm.value.date)}?`,
+    confirmText: 'Confirm',
+  }
+}
+
+function requestBookReservationConfirmation() {
+  if (!selectedBook.value || submitting.value) {
+    notice.value = 'Select a book from the live Library catalog before submitting.'
+    return
+  }
+
+  const book = books.value.find((item) => item.id === selectedBook.value)
+  if (!book || !book.is_active || book.available_copies <= 0) {
+    notice.value = 'The selected book is no longer available. Refresh the catalog and try again.'
+    return
+  }
+
+  pendingConfirmation.value = {
+    type: 'book',
+    title: 'Confirm Book Reservation',
+    message: `Are you sure you want to submit a borrowing request for "${book.title}"?`,
+    confirmText: 'Confirm',
+  }
+}
+
+async function submitRoomReservation() {
+  const room = rooms.value.find((item) => item.id === roomForm.value.roomId)
+  const startAt = new Date(`${roomForm.value.date}T${roomForm.value.startTime}:00`)
+  const endAt = new Date(`${roomForm.value.date}T${roomForm.value.endTime}:00`)
   submitting.value = true
   try {
     await apiRequest('/api/reservations/book', {
       method: 'POST',
       body: JSON.stringify({
         roomId: roomForm.value.roomId,
+        resourceName: room?.name,
         serviceId: reservationService.value?.id || null,
         startAt: startAt.toISOString(),
         endAt: endAt.toISOString(),
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         purpose: roomForm.value.purpose.trim(),
       }),
     })
+    pendingConfirmation.value = null
     showForm.value = false
     activeTab.value = 'Pending'
     notice.value = 'Your room reservation has been submitted for confirmation.'
     await loadData()
   } catch (error) {
     console.error('Error submitting room reservation:', error)
+    pendingConfirmation.value = null
     notice.value = error.message || 'Could not submit your room reservation.'
   } finally {
     submitting.value = false
   }
 }
 
+function requestAppointmentCancellation(appointment) {
+  pendingConfirmation.value = {
+    type: 'appointment-cancel',
+    booking: appointment,
+    title: 'Cancel Appointment?',
+    message: `Are you sure you want to cancel your ${appointment.service} appointment?`,
+    confirmText: 'Cancel Appointment',
+  }
+}
+
 async function cancelAppointment(appointment) {
-  if (!window.confirm(`Cancel your ${appointment.service} appointment?`)) return
+  actionSubmitting.value = true
   try {
     await apiRequest('/api/appointments/cancel', {
       method: 'POST',
       body: JSON.stringify({ appointmentId: appointment.id }),
     })
+    pendingConfirmation.value = null
     notice.value = 'The appointment has been cancelled.'
     await loadData()
   } catch (error) {
     console.error('Error cancelling appointment:', error)
+    pendingConfirmation.value = null
     notice.value = error.message || 'Could not cancel this appointment.'
+  } finally {
+    actionSubmitting.value = false
+  }
+}
+
+function requestReservationCancellation(reservation) {
+  pendingConfirmation.value = {
+    type: 'reservation-cancel',
+    booking: reservation,
+    title: 'Cancel Room Reservation?',
+    message: `Are you sure you want to cancel your reservation for ${reservation.roomName}?`,
+    confirmText: 'Cancel Reservation',
   }
 }
 
 async function cancelReservation(reservation) {
-  if (!window.confirm(`Cancel your reservation for ${reservation.roomName}?`)) return
+  actionSubmitting.value = true
   try {
     await apiRequest('/api/reservations/cancel', {
       method: 'POST',
       body: JSON.stringify({ reservationId: reservation.id }),
     })
+    pendingConfirmation.value = null
     notice.value = 'The room reservation has been cancelled.'
     await loadData()
   } catch (error) {
     console.error('Error cancelling reservation:', error)
+    pendingConfirmation.value = null
     notice.value = error.message || 'Could not cancel this reservation.'
+  } finally {
+    actionSubmitting.value = false
+  }
+}
+
+async function confirmPendingAction() {
+  const confirmation = pendingConfirmation.value
+  if (!confirmation || submitting.value || actionSubmitting.value) return
+
+  if (confirmation.type === 'room') {
+    await submitRoomReservation()
+  } else if (confirmation.type === 'book') {
+    await submitBorrowingRequest()
+  } else if (confirmation.type === 'appointment-cancel') {
+    await cancelAppointment(confirmation.booking)
+  } else if (confirmation.type === 'reservation-cancel') {
+    await cancelReservation(confirmation.booking)
+  }
+}
+
+function closePendingConfirmation() {
+  if (!submitting.value && !actionSubmitting.value) {
+    pendingConfirmation.value = null
   }
 }
 
@@ -393,10 +561,12 @@ function statusDescription(status) {
     confirmed: 'Your booking has been confirmed.',
     completed: 'This booking has been completed.',
     cancelled: 'This booking was cancelled.',
+    no_show: 'This room reservation was marked No Show.',
     Pending: 'Your booking is waiting for confirmation from the office.',
     Confirmed: 'Your booking has been confirmed.',
     Completed: 'This booking has been completed.',
     Cancelled: 'This booking was cancelled.',
+    'No Show': 'This room reservation was marked No Show. Contact Library staff if you attended.',
   }
   return descriptions[status] || 'Check the booking details for the latest information.'
 }
@@ -463,7 +633,10 @@ async function submitBorrowingRequest() {
     notice.value = 'The selected book is no longer available. Refresh the catalog and try again.'
     return
   }
-  if (!window.confirm(`Submit a borrowing request for "${book.title}"?`)) return
+  if (!book.is_active || book.available_copies <= 0) {
+    notice.value = 'The selected book is no longer available. Refresh the catalog and try again.'
+    return
+  }
 
   submitting.value = true
   try {
@@ -471,6 +644,7 @@ async function submitBorrowingRequest() {
       method: 'POST',
       body: JSON.stringify({ bookId: book.id, remarks: roomForm.value.purpose.trim() }),
     })
+    pendingConfirmation.value = null
     notice.value = result.message || 'Your borrowing request has been submitted.'
     selectedBook.value = ''
     roomForm.value.purpose = ''
@@ -478,6 +652,7 @@ async function submitBorrowingRequest() {
     await loadData()
   } catch (error) {
     console.error('Error submitting borrowing request:', error)
+    pendingConfirmation.value = null
     notice.value = error.message || 'Could not submit your borrowing request.'
   } finally {
     submitting.value = false
@@ -541,7 +716,7 @@ onMounted(async () => {
       </button>
       <button
         v-else
-        class="appointment-primary"
+        class="appointment-primary primary-action-button"
         type="button"
         @click="openNewAppointment"
       >
@@ -600,7 +775,12 @@ onMounted(async () => {
           </div>
           <p class="appointment-status-description">{{ statusDescription(booking.status) }}</p>
           <div class="appointment-card-actions">
-            <template v-if="booking.recordType === 'reservation' ? ['Pending', 'Confirmed'].includes(booking.status) : ['pending', 'confirmed', 'reschedule_requested'].includes(booking.status)">
+            <template v-if="isConfirmedGuidanceAppointment(booking)">
+              <button class="appointment-outline" type="button" @click="loadBookingDetails(booking)">
+                View Details
+              </button>
+            </template>
+            <template v-else-if="booking.recordType === 'reservation' ? ['Pending', 'Confirmed'].includes(booking.status) : ['pending', 'confirmed', 'reschedule_requested'].includes(booking.status)">
               <button
                 v-if="booking.recordType === 'appointment' && ['pending', 'confirmed'].includes(booking.status)"
                 class="appointment-outline"
@@ -612,7 +792,7 @@ onMounted(async () => {
               <button
                 class="appointment-danger"
                 type="button"
-                @click="booking.recordType === 'reservation' ? cancelReservation(booking) : cancelAppointment(booking)"
+                @click="booking.recordType === 'reservation' ? requestReservationCancellation(booking) : requestAppointmentCancellation(booking)"
               >
                 Cancel
               </button>
@@ -627,7 +807,7 @@ onMounted(async () => {
               <button class="appointment-outline" type="button" @click="loadBookingDetails(booking)">View Details</button>
             </template>
             <button
-              v-if="booking.recordType === 'appointment' && ['reschedule_requested', 'rejected', 'no_show'].includes(booking.status)"
+              v-if="(booking.recordType === 'appointment' && ['reschedule_requested', 'rejected', 'no_show'].includes(booking.status)) || (booking.recordType === 'reservation' && booking.status === 'No Show')"
               class="appointment-outline"
               type="button"
               @click="loadBookingDetails(booking)"
@@ -666,7 +846,7 @@ onMounted(async () => {
           </label>
           <div class="appointment-form-actions full-width">
             <button class="appointment-outline" type="button" @click="closeForm">Cancel Editing</button>
-            <button class="appointment-primary" type="submit">Review Changes</button>
+            <button class="appointment-primary primary-action-button" type="submit">Review Changes</button>
           </div>
         </form>
       </template>
@@ -724,7 +904,7 @@ onMounted(async () => {
             </label>
             <div class="appointment-form-actions full-width">
               <button class="appointment-outline" type="button" @click="closeForm">Cancel Editing</button>
-              <button class="appointment-primary" type="submit" :disabled="!availableServices.length">
+              <button class="appointment-primary primary-action-button" type="submit" :disabled="!availableServices.length">
                 Review Appointment
               </button>
             </div>
@@ -782,6 +962,15 @@ onMounted(async () => {
               End Time
               <input v-model="roomForm.endTime" type="time" required />
             </label>
+            <p v-if="roomAvailabilityError" class="form-error full-width" role="alert">
+              {{ roomAvailabilityError }}
+            </p>
+            <p v-else-if="roomAvailabilityLoading" class="full-width" role="status">
+              Checking room availability…
+            </p>
+            <p v-else-if="roomForm.date && roomForm.startTime && roomForm.endTime && !availableRooms.length" class="form-error full-width" role="status">
+              No rooms are available for this date and time.
+            </p>
             <label>
               Required Purpose
               <textarea v-model="roomForm.purpose" rows="3" required />
@@ -789,8 +978,8 @@ onMounted(async () => {
             <p class="reservation-grace-note">Please check in within 15 minutes of your reservation start time.</p>
             <div class="appointment-form-actions">
               <button class="appointment-outline" type="button" @click="closeForm">Cancel Editing</button>
-              <button class="appointment-primary" type="button" :disabled="submitting || !rooms.length" @click="submitRoomReservation">
-                {{ submitting ? 'Submitting…' : 'Submit Reservation' }}
+              <button class="appointment-primary primary-action-button" type="button" :disabled="submitting || roomAvailabilityLoading || !!roomAvailabilityError || !availableRooms.length" @click="requestRoomReservationConfirmation">
+                Submit Reservation
               </button>
             </div>
           </section>
@@ -819,8 +1008,8 @@ onMounted(async () => {
             </label>
             <div class="appointment-form-actions">
               <button class="appointment-outline" type="button" @click="closeForm">Cancel Editing</button>
-              <button class="appointment-primary" type="button" :disabled="submitting || booksLoading || !!booksError" @click="submitBorrowingRequest">
-                {{ submitting ? 'Submitting…' : 'Submit Borrowing Request' }}
+              <button class="appointment-primary primary-action-button" type="button" :disabled="submitting || booksLoading || !!booksError" @click="requestBookReservationConfirmation">
+                Submit Borrowing Request
               </button>
             </div>
           </section>
@@ -841,12 +1030,23 @@ onMounted(async () => {
         </dl>
         <div class="appointment-form-actions">
           <button class="appointment-outline" type="button" @click="showConfirm = false">Go Back</button>
-          <button class="appointment-primary" type="button" :disabled="submitting" @click="confirmAppointment">
+          <button class="appointment-primary primary-action-button" type="button" :disabled="submitting" @click="confirmAppointment">
             {{ submitting ? 'Submitting…' : (editingAppointment ? 'Submit Reschedule' : 'Submit Appointment') }}
           </button>
         </div>
       </section>
     </div>
+
+    <ConfirmDialog
+      :model-value="Boolean(pendingConfirmation)"
+      :title="pendingConfirmation?.title || ''"
+      :message="pendingConfirmation?.message || ''"
+      :confirm-text="pendingConfirmation?.confirmText || 'Confirm'"
+      :busy="submitting || actionSubmitting"
+      :busy-text="submitting ? 'Submitting…' : 'Processing…'"
+      @update:model-value="closePendingConfirmation"
+      @confirm="confirmPendingAction"
+    />
 
     <div v-if="selectedBooking" class="appointment-modal-overlay" @click.self="selectedBooking = null">
       <section class="appointment-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="booking-details-title">
@@ -855,10 +1055,21 @@ onMounted(async () => {
         <dl>
           <dt>Reference</dt><dd>{{ selectedBooking.id }}</dd>
           <dt>Date</dt><dd>{{ formatDate(selectedBooking.scheduled_at || selectedBooking.start_at) }}</dd>
+          <template v-if="selectedBooking.recordType === 'reservation'">
+            <dt>Room</dt><dd>{{ selectedBooking.roomName }}</dd>
+            <dt>Time</dt>
+            <dd>
+              {{ formatTime(localDateTimeParts(selectedBooking.start_at).time) }} –
+              {{ formatTime(localDateTimeParts(selectedBooking.end_at).time) }}
+            </dd>
+          </template>
+          <template v-else>
+            <dt>Time</dt><dd>{{ formatTime(selectedBooking.time) }}</dd>
+          </template>
           <dt>Purpose</dt><dd>{{ selectedBooking.purpose || 'No additional details provided.' }}</dd>
         </dl>
         <div class="appointment-form-actions">
-          <button class="appointment-primary" type="button" @click="selectedBooking = null">Close</button>
+          <button class="appointment-outline" type="button" @click="selectedBooking = null">Close</button>
         </div>
       </section>
     </div>

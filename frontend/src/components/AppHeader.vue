@@ -3,6 +3,15 @@ import { onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
 
+defineProps({
+  mobileSidebarOpen: {
+    type: Boolean,
+    default: false,
+  },
+})
+
+const emit = defineEmits(['toggle-sidebar'])
+
 const router = useRouter()
 const unreadCount = ref(0)
 let notificationChannel = null
@@ -80,6 +89,17 @@ onUnmounted(() => {
 
 <template>
   <header class="topbar">
+    <button
+      class="mobile-menu-toggle"
+      type="button"
+      :aria-expanded="mobileSidebarOpen"
+      aria-controls="student-sidebar"
+      :aria-label="mobileSidebarOpen ? 'Close navigation menu' : 'Open navigation menu'"
+      @click="emit('toggle-sidebar')"
+    >
+      ☰
+    </button>
+
     <div class="brand">
       <div class="logo">LQ</div>
       <div class="brand-text">

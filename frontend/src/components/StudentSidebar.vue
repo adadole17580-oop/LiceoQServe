@@ -3,7 +3,14 @@ import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuth } from '../composables/useAuth.js'
 
-const emit = defineEmits(['logout'])
+defineProps({
+  mobileOpen: {
+    type: Boolean,
+    default: false,
+  },
+})
+
+const emit = defineEmits(['logout', 'close'])
 
 const router = useRouter()
 const route = useRoute()
@@ -20,11 +27,21 @@ const menu = [
 
 function navigateTo(path) {
   router.push(path)
+  emit('close')
 }
 </script>
 
 <template>
-  <aside class="sidebar">
+  <aside id="student-sidebar" class="sidebar" :class="{ 'is-open': mobileOpen }">
+    <button
+      class="sidebar-close"
+      type="button"
+      aria-label="Close navigation menu"
+      @click="emit('close')"
+    >
+      ×
+    </button>
+
     <div class="student">
       <p class="student-label">SIGNED IN AS</p>
       <h2>{{ studentName }}</h2>
@@ -47,7 +64,7 @@ function navigateTo(path) {
     <button
       class="logout"
       type="button"
-      @click="emit('logout')"
+      @click="emit('close'); emit('logout')"
     >
       LOG OUT
     </button>

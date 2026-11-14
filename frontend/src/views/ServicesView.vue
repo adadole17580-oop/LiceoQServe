@@ -2,6 +2,8 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
+import { API_BASE_URL } from '../lib/api.js'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 import {
   buildCalendarCells,
   eventOccursOnDate,
@@ -14,10 +16,12 @@ const route = useRoute()
 const selectedOffice = ref('')
 const searchQuery = ref('')
 const bookSearch = ref('')
-const returnBook = ref('')
+const selectedBorrowBook = ref(null)
+const showBorrowConfirmation = ref(false)
 const services = ref([])
 const officeSchedules = ref([])
 const campusEvents = ref([])
+const blockedSchedules = ref([])
 const currentTime = ref(Date.now())
 const today = new Date()
 const calendarMonth = ref(new Date(today.getFullYear(), today.getMonth(), 1))
@@ -27,12 +31,14 @@ const loans = ref([])
 const loading = ref(true)
 const officeSchedulesLoading = ref(true)
 const campusEventsLoading = ref(true)
+const blockedSchedulesLoading = ref(true)
 const bookLoading = ref(false)
 const loansLoading = ref(false)
-const returnSubmitting = ref(false)
+const borrowSubmitting = ref(false)
 const errorMessage = ref('')
 const scheduleError = ref('')
 const eventsError = ref('')
+const blockedSchedulesError = ref('')
 const catalogError = ref('')
 const bookError = ref('')
 const loansError = ref('')
@@ -40,6 +46,7 @@ const notice = ref('')
 const libraryCatalogVisible = ref(false)
 let officeClockInterval = null
 let servicesRealtimeChannel = null
+let servicesRealtimeStartPromise = null
 const SUPABASE_REQUEST_TIMEOUT_MS = 15_000
 let authenticatedSessionPromise = null
 let bookSearchTimeout = null
@@ -48,10 +55,15 @@ let bookSearchController = null
 let booksLoaded = false
 let loansLoaded = false
 const realtimeRefreshTimeouts = new Map()
+const borrowConfirmationMessage = computed(() => {
+  const book = selectedBorrowBook.value
+  if (!book) return ''
+  return `Book: ${book.title}. Author: ${book.author || 'Not listed'}. ISBN: ${book.isbn || 'Not listed'}. Catalog ID: ${book.id}. Confirm to submit a borrowing request to Library staff.`
+})
 
 const actionsByOffice = {
   registrar: ['Join Queue', 'Book Appointment', 'Submit Request'],
-  cashier: ['Join Queue', 'Submit Request'],
+  cashier: ['Join Queue'],
   library: ['Book Appointment', 'Submit Request', 'Room Reservation', 'Book Borrow/Return'],
   guidance: ['Book Appointment'],
   osa: ['Book Appointment', 'Submit Request'],
@@ -147,10 +159,17 @@ const calendarCells = computed(() => buildCalendarCells({
   selectedDateKey: selectedCalendarDate.value,
   events: campusEvents.value,
   offices: offices.value,
+  blockedSchedules: blockedSchedules.value,
 }))
 
 const selectedDateEvents = computed(() =>
   campusEvents.value.filter((event) => eventOccursOnDate(event, selectedCalendarDate.value)),
+)
+
+const selectedDateBlockedSchedules = computed(() =>
+  blockedSchedules.value.filter(
+    (schedule) => dateKey(schedule.blocked_date) === selectedCalendarDate.value,
+  ),
 )
 
 const selectedDateSchedules = computed(() => {
@@ -395,6 +414,16 @@ function scheduleDescription(schedule) {
   return `${shortTime(schedule.opens_at)} - ${shortTime(schedule.closes_at)}`
 }
 
+function blockedScheduleDescription(schedule) {
+  if (schedule.time_slot && !schedule.start_time && !schedule.is_all_day) {
+    return `Unavailable: ${schedule.time_slot}`
+  }
+  if (schedule.is_all_day || !schedule.start_time || !schedule.end_time) {
+    return 'Unavailable all day'
+  }
+  return `Unavailable ${shortTime(schedule.start_time)} - ${shortTime(schedule.end_time)}`
+}
+
 async function getAuthenticatedSession() {
   if (authenticatedSessionPromise) return authenticatedSessionPromise
 
@@ -446,7 +475,8 @@ async function loadOfficeSchedules() {
     const { data, error } = await runSupabaseQuery(
       supabase
         .from('offices')
-        .select('id, name, office_schedules(id, office_id, day_of_week, opens_at, closes_at, is_closed, effective_date, note)')
+        .select('id, name, is_active, office_schedules(id, office_id, day_of_week, opens_at, closes_at, is_closed, effective_date, note)')
+        .eq('is_active', true)
         .order('name', { ascending: true }),
     )
     if (error) throw error
@@ -467,12 +497,14 @@ async function loadCampusEvents() {
     const { data, error } = await runSupabaseQuery(
       supabase
         .from('school_events')
-        .select('id, title, description, starts_at, ends_at, location, event_type, office_id, offices(id, name)')
+        .select('id, title, description, starts_at, ends_at, location, event_type, office_id, offices(id, name, is_active)')
         .eq('is_published', true)
         .order('starts_at', { ascending: true, nullsFirst: false }),
     )
     if (error) throw error
-    campusEvents.value = data || []
+    campusEvents.value = (data || []).filter(
+      (event) => !event.office_id || event.offices?.is_active === true,
+    )
   } catch (error) {
     console.error('Error fetching published campus events:', error)
     eventsError.value = loadErrorMessage(error, 'Could not load campus calendar updates.')
@@ -481,8 +513,29 @@ async function loadCampusEvents() {
   }
 }
 
+async function loadBlockedSchedules() {
+  blockedSchedulesLoading.value = true
+  blockedSchedulesError.value = ''
+  try {
+    const session = await getAuthenticatedSession()
+    const response = await fetch(`${API_BASE_URL}/api/reservations/blocked-schedules`, {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      throw new Error(payload.error || 'Could not load blocked office dates.')
+    }
+    blockedSchedules.value = payload.blockedSchedules || []
+  } catch (error) {
+    console.error('Error fetching office blocked schedules:', error)
+    blockedSchedulesError.value = loadErrorMessage(error, 'Could not load blocked office dates.')
+  } finally {
+    blockedSchedulesLoading.value = false
+  }
+}
+
 async function loadOfficeUpdates() {
-  await Promise.all([loadOfficeSchedules(), loadCampusEvents()])
+  await Promise.all([loadOfficeSchedules(), loadCampusEvents(), loadBlockedSchedules()])
 }
 
 async function loadServices() {
@@ -524,7 +577,7 @@ async function loadBooks() {
     SUPABASE_REQUEST_TIMEOUT_MS,
   )
   try {
-    const url = `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/library/books?query=${encodeURIComponent(bookSearch.value)}`
+    const url = `${API_BASE_URL}/api/library/books?query=${encodeURIComponent(bookSearch.value)}`
     const response = await fetch(url, { signal: controller.signal })
     const payload = await response.json().catch(() => ({}))
     if (!response.ok) throw new Error(payload.error || 'Could not search the Library catalog.')
@@ -563,7 +616,7 @@ async function loadMyLoans() {
     const session = await getAuthenticatedSession()
 
     const response = await fetch(
-      `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/library/my-loans`,
+      `${API_BASE_URL}/api/library/my-loans`,
       { headers: { Authorization: `Bearer ${session.access_token}` } },
     )
     const payload = await response.json().catch(() => ({}))
@@ -610,6 +663,22 @@ function chooseAction(action) {
 }
 
 async function requestBook(book) {
+  if (!book?.id || book.available_copies <= 0 || borrowSubmitting.value) return
+  bookError.value = ''
+  selectedBorrowBook.value = book
+  showBorrowConfirmation.value = true
+}
+
+function closeBorrowConfirmation(isOpen) {
+  showBorrowConfirmation.value = isOpen
+  if (!isOpen && !borrowSubmitting.value) selectedBorrowBook.value = null
+}
+
+async function submitBorrowRequest() {
+  const book = selectedBorrowBook.value
+  if (!book || borrowSubmitting.value) return
+
+  borrowSubmitting.value = true
   bookError.value = ''
   try {
     const { data: { session }, error } = await supabase.auth.getSession()
@@ -617,7 +686,7 @@ async function requestBook(book) {
     if (!session?.access_token) {
       throw new Error('Your session has expired. Please sign in again.')
     }
-    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/library/borrow-request`, {
+    const response = await fetch(`${API_BASE_URL}/api/library/borrow-request`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -628,42 +697,19 @@ async function requestBook(book) {
     const payload = await response.json().catch(() => ({}))
     if (!response.ok) throw new Error(payload.error || 'Could not submit the borrowing request.')
     notice.value = payload.message || `Your request to borrow "${book.title}" was submitted.`
+    showBorrowConfirmation.value = false
+    selectedBorrowBook.value = null
   } catch (error) {
     console.error('Error submitting book borrowing request:', error)
     bookError.value = error?.message || 'Could not submit the borrowing request.'
+  } finally {
+    borrowSubmitting.value = false
   }
 }
 
-async function requestBookReturn() {
-  const book = returnBook.value.trim()
-  if (!book || returnSubmitting.value) return
-
-  returnSubmitting.value = true
-  bookError.value = ''
-  try {
-    const { data: { session }, error } = await supabase.auth.getSession()
-    if (error) throw error
-    if (!session?.access_token) {
-      throw new Error('Your session has expired. Please sign in again.')
-    }
-    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/library/return-request`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({ book }),
-    })
-    const payload = await response.json().catch(() => ({}))
-    if (!response.ok) throw new Error(payload.error || 'Could not submit the return request.')
-    notice.value = payload.message
-    returnBook.value = ''
-  } catch (error) {
-    console.error('Error submitting book return request:', error)
-    bookError.value = error?.message || 'Could not submit the return request.'
-  } finally {
-    returnSubmitting.value = false
-  }
+function loanStatusLabel(status) {
+  const normalized = String(status || '').trim().toLowerCase()
+  return normalized ? normalized[0].toUpperCase() + normalized.slice(1) : 'Unknown'
 }
 
 watch([offices, () => route.query.office], ([officeList, requestedType]) => {
@@ -719,43 +765,60 @@ watch(
 )
 
 async function startServicesRealtime() {
-  try {
-    const session = await getAuthenticatedSession()
-    if (!session?.user || !servicesPageMounted) return
+  if (servicesRealtimeChannel) return
+  if (servicesRealtimeStartPromise) return servicesRealtimeStartPromise
 
-    const userId = session.user.id
-    const channel = supabase.channel(`student-services-${userId}`)
-    const subscribeTo = (table, onChange) => {
-      channel.on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table },
-        onChange,
-      )
-    }
+  const startPromise = (async () => {
+    try {
+      const session = await getAuthenticatedSession()
+      if (!session?.user || !servicesPageMounted) return
 
-    subscribeTo('office_services', () => scheduleRealtimeRefresh('services', loadServices))
-    subscribeTo('offices', () => {
-      scheduleRealtimeRefresh('services', loadServices)
-      scheduleRealtimeRefresh('schedules', loadOfficeSchedules)
-    })
-    subscribeTo('office_schedules', () => scheduleRealtimeRefresh('schedules', loadOfficeSchedules))
-    subscribeTo('school_events', () => scheduleRealtimeRefresh('events', loadCampusEvents))
-    subscribeTo('library_books', () => {
-      if (libraryCatalogVisible.value) scheduleRealtimeRefresh('books', loadBooks)
-    })
-    subscribeTo('book_loans', () => {
-      if (libraryCatalogVisible.value) scheduleRealtimeRefresh('loans', loadMyLoans)
-    })
-
-    servicesRealtimeChannel = channel
-    channel.subscribe((status) => {
-      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-        console.warn('Services Realtime updates are unavailable.')
+      const userId = session.user.id
+      const channel = supabase.channel(`student-services-${userId}`)
+      const subscribeTo = (table, onChange) => {
+        channel.on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table },
+          onChange,
+        )
       }
-    })
-  } catch (error) {
-    if (servicesPageMounted) {
-      console.error('Could not start Services Realtime updates:', error)
+
+      subscribeTo('office_services', () => scheduleRealtimeRefresh('services', loadServices))
+      subscribeTo('offices', () => {
+        scheduleRealtimeRefresh('services', loadServices)
+        scheduleRealtimeRefresh('schedules', loadOfficeSchedules)
+      })
+      subscribeTo('office_schedules', () => scheduleRealtimeRefresh('schedules', loadOfficeSchedules))
+      subscribeTo('school_events', () => scheduleRealtimeRefresh('events', loadCampusEvents))
+      subscribeTo('blocked_schedules', () =>
+        scheduleRealtimeRefresh('blocked-schedules', loadBlockedSchedules),
+      )
+      subscribeTo('library_books', () => {
+        if (libraryCatalogVisible.value) scheduleRealtimeRefresh('books', loadBooks)
+      })
+      subscribeTo('book_loans', () => {
+        if (libraryCatalogVisible.value) scheduleRealtimeRefresh('loans', loadMyLoans)
+      })
+
+      servicesRealtimeChannel = channel
+      channel.subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          console.warn('Services Realtime updates are unavailable.')
+        }
+      })
+    } catch (error) {
+      if (servicesPageMounted) {
+        console.error('Could not start Services Realtime updates:', error)
+      }
+    }
+  })()
+
+  servicesRealtimeStartPromise = startPromise
+  try {
+    await startPromise
+  } finally {
+    if (servicesRealtimeStartPromise === startPromise) {
+      servicesRealtimeStartPromise = null
     }
   }
 }
@@ -817,7 +880,7 @@ onUnmounted(() => {
     <section class="office-updates" aria-labelledby="office-updates-title">
       <div class="updates-title">
         <h3 id="office-updates-title">Office Schedule &amp; Campus Updates</h3>
-        <p>Check office hours and important campus events.</p>
+        <p>Check office hours, temporary closures, and important campus events.</p>
       </div>
 
       <div class="updates-layout">
@@ -894,6 +957,7 @@ onUnmounted(() => {
                     'calendar-date-selected': cell.isSelected,
                     'calendar-date-has-event': cell.hasEvents,
                     'calendar-date-has-schedule': cell.hasScheduleChange,
+                    'calendar-date-has-blocked-schedule': cell.hasBlockedSchedule,
                   }"
                   :aria-label="formatDate(cell.key)"
                   :aria-pressed="cell.isSelected"
@@ -903,6 +967,7 @@ onUnmounted(() => {
                   <span class="calendar-indicators" aria-hidden="true">
                     <i v-if="cell.hasEvents" class="calendar-event-indicator"></i>
                     <i v-if="cell.hasScheduleChange" class="calendar-schedule-indicator"></i>
+                    <i v-if="cell.hasBlockedSchedule" class="calendar-blocked-indicator"></i>
                   </span>
                 </button>
               </template>
@@ -910,13 +975,14 @@ onUnmounted(() => {
             <div class="calendar-legend">
               <span><i class="calendar-event-indicator"></i> Campus event</span>
               <span><i class="calendar-schedule-indicator"></i> Schedule change</span>
+              <span><i class="calendar-blocked-indicator"></i> Temporary closure</span>
             </div>
           </div>
 
           <section class="calendar-day-details" aria-live="polite">
             <h5>{{ formatDate(selectedCalendarDate) }}</h5>
             <p
-              v-if="officeSchedulesLoading || campusEventsLoading"
+              v-if="officeSchedulesLoading || campusEventsLoading || blockedSchedulesLoading"
               class="calendar-empty-state"
               role="status"
             >
@@ -930,6 +996,13 @@ onUnmounted(() => {
                   <span v-if="item.schedule.note"> · {{ item.schedule.note }}</span>
                 </p>
               </div>
+              <div v-if="selectedDateBlockedSchedules.length" class="calendar-detail-group">
+                <h6>Temporary office unavailability</h6>
+                <p v-for="schedule in selectedDateBlockedSchedules" :key="schedule.id">
+                  <strong>{{ schedule.office_name }}:</strong> {{ blockedScheduleDescription(schedule) }}
+                  <span v-if="schedule.reason"> · {{ schedule.reason }}</span>
+                </p>
+              </div>
               <div v-if="selectedDateEvents.length" class="calendar-detail-group">
                 <h6>Campus events</h6>
                 <article v-for="event in selectedDateEvents" :key="event.id">
@@ -939,7 +1012,7 @@ onUnmounted(() => {
                 </article>
               </div>
               <p
-                v-if="!selectedDateSchedules.length && !selectedDateEvents.length"
+                v-if="!selectedDateSchedules.length && !selectedDateBlockedSchedules.length && !selectedDateEvents.length"
                 class="calendar-empty-state"
               >
                 No schedule changes or campus events for this date.
@@ -950,6 +1023,10 @@ onUnmounted(() => {
           <div v-if="eventsError" class="services-error" role="alert">
             {{ eventsError }}
             <button type="button" @click="loadCampusEvents">Try Again</button>
+          </div>
+          <div v-if="blockedSchedulesError" class="services-error" role="alert">
+            {{ blockedSchedulesError }}
+            <button type="button" @click="loadBlockedSchedules">Try Again</button>
           </div>
           <p v-else-if="campusEventsLoading" class="no-results" role="status">Loading campus calendar…</p>
           <p v-else-if="!campusEvents.length" class="no-results">
@@ -1024,8 +1101,8 @@ onUnmounted(() => {
         <button
           v-for="action in activeOffice.actions"
           :key="action"
+          class="office-service-action primary-action-button"
           type="button"
-          :class="{ 'primary-action': action !== 'Submit Request' }"
           @click="chooseAction(action)"
         >
           {{ action }}
@@ -1065,7 +1142,7 @@ onUnmounted(() => {
                   </span>
                 </td>
                 <td>
-                  <button type="button" :disabled="book.available_copies <= 0" @click="requestBook(book)">
+                  <button class="office-service-action primary-action-button" type="button" :disabled="book.available_copies <= 0 || borrowSubmitting" @click="requestBook(book)">
                     Request to Borrow
                   </button>
                 </td>
@@ -1074,21 +1151,7 @@ onUnmounted(() => {
           </table>
         </div>
         <p v-if="bookError" class="services-error" role="alert">{{ bookError }}</p>
-        <form class="library-return-form" @submit.prevent="requestBookReturn">
-          <h4>Request a Book Return</h4>
-          <label for="return-book">Borrowed book title or ISBN</label>
-          <input
-            id="return-book"
-            v-model="returnBook"
-            type="text"
-            placeholder="Enter the exact title or ISBN of your borrowed book"
-            required
-          />
-          <button type="submit" :disabled="returnSubmitting">
-            {{ returnSubmitting ? 'Submitting…' : 'Submit Return Request' }}
-          </button>
-        </form>
-        <p class="library-note">Borrowing and return requests are tracked through My Requests and require Library staff confirmation.</p>
+        <p class="library-note">Borrowing requests require Library staff confirmation. To return a book, open My Requests → Books and select Return Book beside the active loan.</p>
 
         <section class="library-my-loans" aria-labelledby="my-library-loans-title">
           <h4 id="my-library-loans-title">My Library Loans</h4>
@@ -1113,7 +1176,7 @@ onUnmounted(() => {
                     <strong>{{ loan.library_books?.title || 'Library Book' }}</strong>
                     <small>{{ loan.library_books?.isbn || loan.id }}</small>
                   </td>
-                  <td>{{ loan.status }}</td>
+                  <td>{{ loanStatusLabel(loan.status) }}</td>
                   <td>{{ loan.due_at ? new Date(loan.due_at).toLocaleDateString() : '—' }}</td>
                   <td>{{ loan.returned_at ? new Date(loan.returned_at).toLocaleDateString() : '—' }}</td>
                 </tr>
@@ -1123,5 +1186,16 @@ onUnmounted(() => {
         </section>
       </div>
     </section>
+
+    <ConfirmDialog
+      :model-value="showBorrowConfirmation"
+      title="Confirm Book Borrowing Request"
+      :message="borrowConfirmationMessage"
+      confirm-text="Confirm Request"
+      :busy="borrowSubmitting"
+      busy-text="Submitting…"
+      @update:model-value="closeBorrowConfirmation"
+      @confirm="submitBorrowRequest"
+    />
   </div>
 </template>

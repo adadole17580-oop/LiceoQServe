@@ -132,17 +132,6 @@
     box-shadow 0.18s ease;
 }
 
-.appointment-primary {
-  background: var(--appointment-maroon);
-  color: var(--appointment-white);
-}
-
-.appointment-primary:hover {
-  border-color: var(--appointment-maroon-dark);
-  background: var(--appointment-maroon-dark);
-  box-shadow: 0 3px 9px rgb(75 8 14 / 12%);
-}
-
 .appointment-outline {
   background: var(--appointment-white);
   color: var(--appointment-maroon);
@@ -174,7 +163,6 @@
   outline-offset: 3px;
 }
 
-.appointment-primary:disabled,
 .appointment-outline:disabled,
 .appointment-danger:disabled {
   opacity: 0.55;
@@ -348,6 +336,11 @@
 }
 
 .appointment-status.cancelled {
+  background: #f3e2e4;
+  color: #742b32;
+}
+
+.appointment-status.no-show {
   background: #f3e2e4;
   color: #742b32;
 }
@@ -1259,6 +1252,11 @@
 }
 
 .appointments-page .appointment-status.cancelled {
+  background: var(--lq-danger);
+  color: var(--lq-text);
+}
+
+.appointments-page .appointment-status.no-show {
   background: var(--lq-danger);
   color: var(--lq-text);
 }

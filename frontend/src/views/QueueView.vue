@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from "vue";
 import { supabase } from "../lib/supabase.js";
+import { API_BASE_URL } from "../lib/api.js";
 import { useStudentDataSync } from "../composables/useStudentDataSync.js";
 import "../assets/styles/queue.css";
 
@@ -24,7 +25,8 @@ let cashierAvailabilityRefreshInProgress = false
 
 const officeServices = computed(() => availableServices.value.filter((service) => (
   service.offices?.name === selectedOffice.value &&
-  (selectedOffice.value !== "Cashier" || /tuition|payment|account|balance/i.test(service.name))
+  (selectedOffice.value !== "Cashier" ||
+    /tuition|payment|account|balance|cashier queue/i.test(service.name))
 )));
 const selectedService = computed(() => officeServices.value.find((service) => service.id === selectedServiceId.value));
 
@@ -48,7 +50,8 @@ function chooseOffice(office) {
   selectedOffice.value = office;
   selectedServiceId.value = availableServices.value.find((service) => (
     service.offices?.name === office &&
-    (office !== "Cashier" || /tuition|payment|account|balance/i.test(service.name))
+    (office !== "Cashier" ||
+      /tuition|payment|account|balance|cashier queue/i.test(service.name))
   ))?.id || "";
   historyNotice.value = "";
   errorMessage.value = "";
@@ -109,7 +112,7 @@ async function refreshCashierAvailability() {
     }
 
     const response = await fetch(
-      `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/queue/cashier-availability`,
+      `${API_BASE_URL}/api/queue/cashier-availability`,
       { headers: { Authorization: `Bearer ${token}` } },
     )
     const result = await response.json()
@@ -132,7 +135,7 @@ async function fetchActiveTicket() {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session?.user) return
 
-    const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/queue/active`, {
+    const res = await fetch(`${API_BASE_URL}/api/queue/active`, {
       headers: { Authorization: `Bearer ${session.access_token}` },
     })
 
@@ -205,7 +208,7 @@ async function requestQueue() {
       return;
     }
 
-    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/queue/join`, {
+    const response = await fetch(`${API_BASE_URL}/api/queue/join`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -224,7 +227,7 @@ async function requestQueue() {
         const { data: { session: recoverySession } } = await supabase.auth.getSession()
         if (recoverySession?.access_token) {
           const recoveryResponse = await fetch(
-            `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/queue/active`,
+            `${API_BASE_URL}/api/queue/active`,
             { headers: { Authorization: `Bearer ${recoverySession.access_token}` } },
           )
           const recoveryData = await recoveryResponse.json()
@@ -261,7 +264,7 @@ async function confirmCancelQueue() {
     const { data: { session } } = await supabase.auth.getSession()
     const token = session?.access_token
 
-    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/queue/cancel`, {
+    const response = await fetch(`${API_BASE_URL}/api/queue/cancel`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -371,7 +374,7 @@ onUnmounted(() => {
       </p>
 
       <button
-        class="queue-primary-button"
+        class="queue-primary-button primary-action-button"
         type="button"
         :disabled="loading || servicesLoading || !selectedService || (selectedOffice === 'Cashier' && !cashierAvailable)"
         @click="requestQueue"

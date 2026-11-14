@@ -53,6 +53,7 @@ function getTargetRoute(category, relatedId) {
     office_event: '/student/services',
     office_schedule: '/student/services',
     office_service: '/student/services',
+    office_closure: '/student/services',
     campus_announcement: '/student/home',
     office_announcement: '/student/home',
   }
@@ -64,7 +65,7 @@ function getTargetRoute(category, relatedId) {
   if (normalizedCategory === 'campus_event' || normalizedCategory === 'office_event') {
     if (relatedId) query.event = relatedId
   }
-  if (normalizedCategory === 'office_schedule' && relatedId) query.schedule = relatedId
+  if ((normalizedCategory === 'office_schedule' || normalizedCategory === 'office_closure') && relatedId) query.schedule = relatedId
   if (normalizedCategory === 'office_service' && relatedId) query.service = relatedId
   return Object.keys(query).length ? { path, query } : path
 }

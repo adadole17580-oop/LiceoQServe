@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
+import { API_BASE_URL } from '../lib/api.js'
 import { useAuth } from '../composables/useAuth.js'
 import { useStudentDataSync } from '../composables/useStudentDataSync.js'
 import '../assets/styles/home.css'
@@ -34,7 +35,7 @@ async function loadDashboardData() {
 
     try {
       const queueResponse = await fetch(
-        `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/queue/active`,
+        `${API_BASE_URL}/api/queue/active`,
         { headers: { Authorization: `Bearer ${session.access_token}` } },
       )
       if (!queueResponse.ok) throw new Error('Could not load the active queue ticket.')

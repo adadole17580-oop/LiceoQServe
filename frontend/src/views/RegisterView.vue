@@ -231,7 +231,7 @@ async function register() {
             {{ successMessage }}
           </p>
 
-          <button class="primary-button" type="submit" :disabled="loading">
+          <button class="primary-button primary-action-button" type="submit" :disabled="loading">
             {{ loading ? 'Creating Account...' : 'Create Account' }}
           </button>
 

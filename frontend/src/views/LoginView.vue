@@ -1,18 +1,35 @@
 <script setup>
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuth } from '../composables/useAuth.js'
 import '../assets/styles/auth.css'
 
 const router = useRouter()
+const route = useRoute()
 const { signIn: authSignIn } = useAuth()
 
 const email = ref('')
 const password = ref('')
 const showPassword = ref(false)
 const rememberMe = ref(false)
-const errorMessage = ref('')
+const errorMessage = ref(route.query.authError === 'onboarding'
+  ? 'No existing LiceoQServe profile is linked to this account. Student onboarding is required before portal access.'
+  : route.query.authError === 'profile'
+    ? 'Your account profile could not be verified. Please try again or contact support.'
+    : route.query.authError === 'unauthorized'
+      ? 'This account does not have an authorized LiceoQServe role.'
+      : '')
 const loading = ref(false)
+
+watch(() => route.query.authError, (authError) => {
+  errorMessage.value = authError === 'onboarding'
+    ? 'No existing LiceoQServe profile is linked to this account. Student onboarding is required before portal access.'
+    : authError === 'profile'
+      ? 'Your account profile could not be verified. Please try again or contact support.'
+      : authError === 'unauthorized'
+        ? 'This account does not have an authorized LiceoQServe role.'
+        : ''
+})
 
 async function signIn() {
   errorMessage.value = ''
@@ -30,7 +47,7 @@ async function signIn() {
   loading.value = true
   try {
     await authSignIn(email.value, password.value)
-    router.push('/student/home')
+    await router.push('/student/home')
   } catch (err) {
     console.error('Sign in error:', err)
     errorMessage.value = err.message || 'Invalid university email or password.'
@@ -129,7 +146,7 @@ async function signIn() {
             {{ errorMessage }}
           </p>
 
-          <button class="primary-button" type="submit" :disabled="loading">
+          <button class="primary-button primary-action-button" type="submit" :disabled="loading">
             {{ loading ? 'Signing In...' : 'Sign In' }}
           </button>
 

@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted } from "vue";
 import { supabase } from "../lib/supabase.js";
+import { useAuth } from "../composables/useAuth.js";
 import { useStudentDataSync } from "../composables/useStudentDataSync.js";
 import "../assets/styles/profile.css";
 
@@ -9,6 +10,10 @@ const showPasswordForm = ref(false);
 const notice = ref("");
 const profileError = ref("");
 const loading = ref(true);
+const accountRole = ref("");
+const googleLinked = ref(false);
+const linkingGoogle = ref(false);
+const { linkGoogleIdentity } = useAuth();
 
 const profile = ref({
   studentId: "",
@@ -38,10 +43,10 @@ async function loadProfile() {
   loading.value = true
   profileError.value = ''
   try {
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session?.user) throw new Error('Please sign in again to load your profile.')
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
+    if (userError) throw userError
+    if (!user) throw new Error('Please sign in again to load your profile.')
 
-    const user = session.user
     const { data: profileData, error } = await supabase
       .from('profiles')
       .select('*')
@@ -51,6 +56,8 @@ async function loadProfile() {
     if (error) throw error
     if (!profileData) throw new Error('Your account profile is incomplete. Please contact support.')
 
+    accountRole.value = profileData.role || "";
+    googleLinked.value = user.identities?.some((identity) => identity.provider === 'google') || false;
     const names = (profileData.full_name || '').split(' ')
     const firstName = names[0] || 'Student'
     const lastName = names.slice(1).join(' ') || ''
@@ -70,6 +77,19 @@ async function loadProfile() {
     profileError.value = err.message || 'Could not load your profile.'
   } finally {
     loading.value = false
+  }
+}
+
+async function linkGoogleAccount() {
+  notice.value = "";
+  linkingGoogle.value = true;
+  try {
+    await linkGoogleIdentity();
+  } catch (err) {
+    console.error('Could not start Google identity linking:', err);
+    notice.value = err.message || 'Could not start Google account linking.';
+  } finally {
+    linkingGoogle.value = false;
   }
 }
 
@@ -203,7 +223,7 @@ onMounted(() => {
 
       <button
         v-if="!editing"
-        class="profile-primary"
+        class="profile-primary primary-action-button"
         type="button"
         @click="startEditing"
       >
@@ -260,7 +280,7 @@ onMounted(() => {
           <button type="button" class="profile-outline" @click="cancelEditing">
             Cancel
           </button>
-          <button type="submit" class="profile-primary">
+          <button type="submit" class="profile-primary primary-action-button">
             Save Changes
           </button>
         </div>
@@ -305,6 +325,25 @@ onMounted(() => {
             <strong>{{ profile.contactNumber || 'Not provided' }}</strong>
           </div>
         </div>
+      </div>
+    </section>
+
+    <section v-if="accountRole === 'student'" class="profile-card">
+      <div class="profile-account-heading">
+        <div>
+          <h3>Google Sign-In</h3>
+          <p v-if="googleLinked">A Google identity is linked to this student account.</p>
+          <p v-else>Sign in to this existing student account before linking Google.</p>
+        </div>
+        <button
+          v-if="!googleLinked"
+          class="profile-primary primary-action-button"
+          type="button"
+          :disabled="linkingGoogle"
+          @click="linkGoogleAccount"
+        >
+          {{ linkingGoogle ? 'Connecting…' : 'Link Google Account' }}
+        </button>
       </div>
     </section>
 
@@ -391,7 +430,7 @@ onMounted(() => {
           </div>
         </label>
 
-        <button class="profile-primary" type="submit">
+        <button class="profile-primary primary-action-button" type="submit">
           Update Password
         </button>
       </form>

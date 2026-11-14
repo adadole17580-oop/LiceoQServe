@@ -22,6 +22,7 @@ export function buildCalendarCells({
   selectedDateKey,
   events = [],
   offices = [],
+  blockedSchedules = [],
 }) {
   const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7
   const dayCount = new Date(year, month + 1, 0).getDate()
@@ -43,6 +44,9 @@ export function buildCalendarCells({
         (office.office_schedules || []).some(
           (schedule) => schedule.effective_date && normalizeCalendarDate(schedule.effective_date) === key,
         ),
+      ),
+      hasBlockedSchedule: blockedSchedules.some(
+        (schedule) => normalizeCalendarDate(schedule.blocked_date) === key,
       ),
     }
   })

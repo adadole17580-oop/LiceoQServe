@@ -58,15 +58,6 @@
   cursor: pointer;
 }
 
-.request-primary {
-  background: var(--request-maroon);
-  color: #fff;
-}
-
-.request-primary:hover {
-  background: #4b080e;
-}
-
 .request-outline {
   background: #fff;
   color: var(--request-maroon);
@@ -91,7 +82,6 @@
   background: #741820;
 }
 
-.request-primary:disabled,
 .request-outline:disabled,
 .request-danger:disabled {
   opacity: 0.55;

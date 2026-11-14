@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, onMounted } from "vue";
 import { supabase } from "../lib/supabase.js";
+import { filterHistoryTransactions, normalizeHistoryType } from "../utils/historyTypes.js";
 import { useStudentDataSync } from "../composables/useStudentDataSync.js";
 import "../assets/styles/history.css";
 
@@ -11,13 +12,16 @@ const loadError = ref('');
 
 const transactions = ref([]);
 
-const filters = ["All", "Queue", "Appointment", "Request", "Reservation"];
+const filters = [
+  { value: "All", label: "All History" },
+  { value: "Queue", label: "Queue" },
+  { value: "Appointment", label: "Appointments" },
+  { value: "Request", label: "Requests" },
+  { value: "Reservation", label: "Reservations" },
+];
 
 const filteredTransactions = computed(() => {
-  if (activeFilter.value === "All") return transactions.value;
-  return transactions.value.filter(
-    (transaction) => transaction.type === activeFilter.value
-  );
+  return filterHistoryTransactions(transactions.value, activeFilter.value);
 });
 
 async function fetchServiceHistory() {
@@ -38,7 +42,7 @@ async function fetchServiceHistory() {
       const completedDate = new Date(item.completed_at || item.created_at)
       return {
         id: item.id,
-        type: item.transaction_type || 'Transaction',
+        type: normalizeHistoryType(item.transaction_type),
         office: item.office_services?.offices?.name || 'Campus Office',
         title: item.title,
         date: completedDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
@@ -86,12 +90,12 @@ onMounted(() => {
     <nav class="history-filters" aria-label="Filter transaction history">
       <button
         v-for="filter in filters"
-        :key="filter"
-        :class="{ active: activeFilter === filter }"
+        :key="filter.value"
+        :class="{ active: activeFilter === filter.value }"
         type="button"
-        @click="activeFilter = filter"
+        @click="activeFilter = filter.value"
       >
-        {{ filter }}
+        {{ filter.label }}
       </button>
     </nav>
 

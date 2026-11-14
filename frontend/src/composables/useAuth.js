@@ -1,5 +1,6 @@
 import { ref, computed } from 'vue'
 import { supabase } from '../lib/supabase.js'
+import { API_BASE_URL } from '../lib/api.js'
 
 const currentUser = ref(null)
 const currentProfile = ref(null)
@@ -106,7 +107,7 @@ export function useAuth() {
   }
 
   async function signUp({ email, password, fullName, studentId, program, yearLevel }) {
-    const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/auth/register`, {
+    const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -130,6 +131,49 @@ export function useAuth() {
     return payload
   }
 
+  async function linkGoogleIdentity() {
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
+    if (userError) throw userError
+    if (!user) throw new Error('Please sign in to your existing student account before linking Google.')
+
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id, role, student_id, university_email')
+      .eq('id', user.id)
+      .maybeSingle()
+
+    if (profileError) throw profileError
+    if (!profile || profile.role !== 'student') {
+      throw new Error('Only an existing student account can link a Google identity.')
+    }
+
+    const emailMatch = String(profile.university_email || '').match(/(\d{5})@liceo\.edu\.ph$/i)
+    const studentIdDigits = String(profile.student_id || '').replace(/\D/g, '')
+    if (!emailMatch || studentIdDigits.length < 5 || emailMatch[1] !== studentIdDigits.slice(-5)) {
+      throw new Error('Your existing profile does not match the Liceo student email format. Contact student support before linking Google.')
+    }
+
+    if (user.identities?.some((identity) => identity.provider === 'google')) {
+      throw new Error('A Google identity is already linked to this account.')
+    }
+
+    sessionStorage.setItem('lq-google-link-user-id', user.id)
+    const { error: linkError } = await supabase.auth.linkIdentity({
+      provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?flow=google-link`,
+      },
+    })
+
+    if (linkError) {
+      sessionStorage.removeItem('lq-google-link-user-id')
+      if (linkError.code === 'manual_linking_disabled') {
+        throw new Error('Google account linking is disabled in Supabase. Ask an administrator to enable manual identity linking.')
+      }
+      throw linkError
+    }
+  }
+
   async function signOut() {
     await supabase.auth.signOut()
     currentUser.value = null
@@ -147,6 +191,7 @@ export function useAuth() {
     initAuth,
     signIn,
     signUp,
+    linkGoogleIdentity,
     signOut,
   }
 }

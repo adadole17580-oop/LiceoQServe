@@ -2,6 +2,8 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '../lib/supabase.js'
+import { API_BASE_URL } from '../lib/api.js'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 import { useAuth } from '../composables/useAuth.js'
 import '../assets/styles/app.css'
 
@@ -18,6 +20,7 @@ const requestsList = ref([])
 const appointmentsList = ref([])
 const roomReservations = ref([])
 const bookLoans = ref([])
+const bookReturnRequests = ref([])
 const nowServingTicket = ref(null)
 const requestInstructions = ref({})
 
@@ -27,6 +30,9 @@ const loading = ref(false)
 
 const showLoanModal = ref(false)
 const selectedBorrowRequest = ref(null)
+const staffConfirmation = ref(null)
+const staffConfirmationBusy = ref(false)
+const issuingLoan = ref(false)
 const loanDueDate = ref(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10))
 let queueRefreshTimer = null
 let queueRefreshInProgress = false
@@ -48,10 +54,52 @@ function requestStatusLabel(status) {
     pending: 'Pending',
     processing: 'Processing',
     ready_for_pickup: 'Ready for Pickup',
+    confirmed: 'Confirmed',
+    rejected: 'Rejected',
+    borrowed: 'Borrowed',
     completed: 'Completed',
     cancelled: 'Cancelled',
   }[status] || status
 }
+
+function reservationStatusLabel(status) {
+  const normalized = String(status || '').trim().toLowerCase()
+  return {
+    pending: 'Pending',
+    confirmed: 'Confirmed',
+    rejected: 'Rejected',
+    cancelled: 'Cancelled',
+    completed: 'Completed',
+    no_show: 'No Show',
+  }[normalized] || status
+}
+
+const bookBorrowRequests = computed(() => requestsList.value.filter((request) => (
+  /^Book Borrow Request:/i.test(request.title || '') &&
+  ['pending', 'processing'].includes(request.status)
+)))
+
+const staffConfirmationTitle = computed(() => ({
+  'reject-borrow': 'Reject Borrowing Request',
+  'confirm-return': 'Confirm Physical Book Return',
+  'reject-return': 'Reject Return Request',
+}[staffConfirmation.value?.type] || 'Confirm Library Action'))
+
+const staffConfirmationMessage = computed(() => {
+  const action = staffConfirmation.value
+  if (!action) return ''
+  const title = action.bookTitle || action.request?.title?.replace(/^Book (Borrow|Return) Request:\s*/i, '') || 'this book'
+  if (action.type === 'reject-borrow') {
+    return `Reject the borrowing request for "${title}"? No book loan will be created.`
+  }
+  if (action.type === 'confirm-return') {
+    if (String(action.request?.loan?.status || '').trim().toLowerCase() === 'returned') {
+      return `"${title}" is already marked returned. Finalize the return request without changing the loan or book copy count again?`
+    }
+    return `Confirm that Library staff physically received "${title}". The loan will be marked returned and its available copy restored.`
+  }
+  return `Reject the return request for "${title}"? The book loan will remain Borrowed.`
+})
 
 async function loadStaffData() {
   loading.value = true
@@ -59,13 +107,14 @@ async function loadStaffData() {
   errorMessage.value = ''
   requestsList.value = []
   appointmentsList.value = []
+  bookReturnRequests.value = []
 
   try {
     const { data: { session } } = await supabase.auth.getSession()
     const token = session?.access_token
 
     const headers = { Authorization: `Bearer ${token}` }
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+    const apiUrl = API_BASE_URL
 
     if (['Cashier', 'Registrar'].includes(selectedOffice.value)) {
       const qRes = await fetch(`${apiUrl}/api/staff/queue-list`, { headers })
@@ -111,13 +160,15 @@ async function loadStaffData() {
     }
 
     if (selectedOffice.value === 'Library') {
-      const [reservationResponse, loanResponse] = await Promise.all([
+      const [reservationResponse, loanResponse, returnRequestResponse] = await Promise.all([
         fetch(`${apiUrl}/api/reservations/staff`, { headers }),
         fetch(`${apiUrl}/api/library/staff-loans`, { headers }),
+        fetch(`${apiUrl}/api/library/staff-return-requests`, { headers }),
       ])
-      const [reservationData, loanData] = await Promise.all([
+      const [reservationData, loanData, returnRequestData] = await Promise.all([
         reservationResponse.json(),
         loanResponse.json(),
+        returnRequestResponse.json(),
       ])
       if (!reservationResponse.ok) {
         throw new Error(reservationData.error || 'Could not load room reservations.')
@@ -125,8 +176,12 @@ async function loadStaffData() {
       if (!loanResponse.ok) {
         throw new Error(loanData.error || 'Could not load active book loans.')
       }
+      if (!returnRequestResponse.ok) {
+        throw new Error(returnRequestData.error || 'Could not load book return requests.')
+      }
       roomReservations.value = reservationData.reservations || []
       bookLoans.value = loanData.loans || []
+      bookReturnRequests.value = returnRequestData.requests || []
     }
   } catch (err) {
     console.error('Error loading staff dashboard:', err)
@@ -145,7 +200,7 @@ async function refreshQueueData() {
     if (!session?.access_token) return
 
     const response = await fetch(
-      `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/staff/queue-list`,
+      `${API_BASE_URL}/api/staff/queue-list`,
       { headers: { Authorization: `Bearer ${session.access_token}` } },
     )
     const data = await response.json()
@@ -165,7 +220,7 @@ async function refreshQueueData() {
 async function callNextTicket() {
   try {
     const { data: { session } } = await supabase.auth.getSession()
-    const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/queue/call-next`, {
+    const res = await fetch(`${API_BASE_URL}/api/queue/call-next`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -189,7 +244,7 @@ async function callNextTicket() {
 async function recallTicket(queueId) {
   try {
     const { data: { session } } = await supabase.auth.getSession()
-    const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/queue/recall`, {
+    const res = await fetch(`${API_BASE_URL}/api/queue/recall`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -212,7 +267,7 @@ async function recallTicket(queueId) {
 async function completeTicket(queueId, outcome = 'finished') {
   try {
     const { data: { session } } = await supabase.auth.getSession()
-    const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/queue/complete`, {
+    const res = await fetch(`${API_BASE_URL}/api/queue/complete`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -237,7 +292,7 @@ async function completeTicket(queueId, outcome = 'finished') {
 async function updateRequestStatus(requestId, status) {
   try {
     const { data: { session } } = await supabase.auth.getSession()
-    const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/requests/update-status`, {
+    const res = await fetch(`${API_BASE_URL}/api/requests/update-status`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -265,7 +320,7 @@ async function sendRequestInstruction(request) {
 
   try {
     const { data: { session } } = await supabase.auth.getSession()
-    const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/requests/instruction`, {
+    const res = await fetch(`${API_BASE_URL}/api/requests/instruction`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -293,7 +348,7 @@ async function updateAppointmentStatus(appointmentId, status, scheduleInput, mes
       return
     }
 
-    const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/appointments/update-status`, {
+    const res = await fetch(`${API_BASE_URL}/api/appointments/update-status`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -320,7 +375,7 @@ async function updateAppointmentStatus(appointmentId, status, scheduleInput, mes
 async function updateReservationStatus(reservationId, status) {
   try {
     const { data: { session } } = await supabase.auth.getSession()
-    const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/reservations/update-status`, {
+    const res = await fetch(`${API_BASE_URL}/api/reservations/update-status`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -341,12 +396,18 @@ async function updateReservationStatus(reservationId, status) {
   }
 }
 
-async function confirmIssueLoan() {
-  if (!selectedBorrowRequest.value || !loanDueDate.value) return
+function reservationHasEnded(reservation) {
+  const endTime = new Date(reservation.end_at).getTime()
+  return Number.isFinite(endTime) && endTime < Date.now()
+}
 
+async function confirmIssueLoan() {
+  if (!selectedBorrowRequest.value || !loanDueDate.value || issuingLoan.value) return
+
+  issuingLoan.value = true
   try {
     const { data: { session } } = await supabase.auth.getSession()
-    const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/library/issue-loan`, {
+    const res = await fetch(`${API_BASE_URL}/api/library/issue-loan`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -363,35 +424,87 @@ async function confirmIssueLoan() {
     if (res.ok) {
       notice.value = data.message
       showLoanModal.value = false
+      selectedBorrowRequest.value = null
       await loadStaffData()
     } else {
       errorMessage.value = data.error || 'Failed to issue loan.'
     }
   } catch (err) {
     console.error('Error issuing loan:', err)
+    errorMessage.value = err.message || 'Could not issue the book loan.'
+  } finally {
+    issuingLoan.value = false
   }
 }
 
-async function recordBookReturn(loanId) {
+function openStaffConfirmation(type, request, bookTitle) {
+  staffConfirmation.value = { type, request, bookTitle }
+}
+
+async function confirmStaffAction() {
+  const action = staffConfirmation.value
+  if (!action || staffConfirmationBusy.value) return
+
+  const endpoint = {
+    'reject-borrow': '/api/library/reject-borrow-request',
+    'confirm-return': '/api/library/return-book',
+    'reject-return': '/api/library/reject-return-request',
+  }[action.type]
+  if (!endpoint) return
+
+  staffConfirmationBusy.value = true
   try {
     const { data: { session } } = await supabase.auth.getSession()
-    const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/library/return-book`, {
+    const res = await fetch(`${API_BASE_URL}${endpoint}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${session?.access_token}`,
       },
-      body: JSON.stringify({ loanId }),
+      body: JSON.stringify({ requestId: action.request.id }),
     })
-
     const data = await res.json()
-    if (res.ok) {
-      notice.value = data.message
-      await loadStaffData()
-    }
+    if (!res.ok) throw new Error(data.error || 'Could not process the Library book request.')
+
+    notice.value = data.message
+    staffConfirmation.value = null
+    await loadStaffData()
   } catch (err) {
-    console.error('Error recording return:', err)
+    console.error('Error processing Library book request:', err)
+    errorMessage.value = err.message || 'Could not process the Library book request.'
+  } finally {
+    staffConfirmationBusy.value = false
   }
+}
+
+function cancelStaffConfirmation(isOpen) {
+  if (!isOpen && !staffConfirmationBusy.value) staffConfirmation.value = null
+}
+
+function loanStatusLabel(status) {
+  const normalized = String(status || '').trim().toLowerCase()
+  return normalized ? normalized[0].toUpperCase() + normalized.slice(1) : 'Unknown'
+}
+
+function formatLoanDate(value) {
+  if (!value) return '—'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString()
+}
+
+function openLoanIssue(request) {
+  selectedBorrowRequest.value = request
+  showLoanModal.value = true
+}
+
+function closeLoanIssue() {
+  if (issuingLoan.value) return
+  showLoanModal.value = false
+  selectedBorrowRequest.value = null
+}
+
+function canProcessReturn(request) {
+  return ['borrowed', 'returned'].includes(String(request.loan?.status || '').trim().toLowerCase())
 }
 
 onMounted(() => {
@@ -536,7 +649,7 @@ onUnmounted(() => {
 
         <div style="margin-bottom: 24px;">
           <h4 style="margin: 0 0 12px; color: #43060a;">Room Reservations</h4>
-          <div v-if="roomReservations.length === 0" style="padding: 16px; color: #7a5052;">No pending or confirmed room reservations.</div>
+          <div v-if="roomReservations.length === 0" style="padding: 16px; color: #7a5052;">No pending, confirmed, or No Show room reservations.</div>
           <div v-else style="display: flex; flex-direction: column; gap: 10px;">
             <div
               v-for="reservation in roomReservations"
@@ -551,12 +664,12 @@ onUnmounted(() => {
                 <p style="margin: 0; color: #967f7f; font-size: 12px;">{{ reservation.purpose }}</p>
               </div>
               <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end;">
-                <span style="font-size: 12px; background: #fde8e8; color: #9b1c1c; padding: 4px 8px; border-radius: 4px;">{{ reservation.status }}</span>
+                <span style="font-size: 12px; background: #fde8e8; color: #9b1c1c; padding: 4px 8px; border-radius: 4px;">{{ reservationStatusLabel(reservation.status) }}</span>
                 <button
                   v-if="reservation.status === 'Pending'"
                   type="button"
                   style="background: #59080d; color: #fff; border: none; padding: 6px 10px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 12px;"
-                  @click="updateReservationStatus(reservation.id, 'Confirmed')"
+                  @click="updateReservationStatus(reservation.id, 'confirmed')"
                 >
                   Confirm
                 </button>
@@ -564,14 +677,31 @@ onUnmounted(() => {
                   v-if="reservation.status === 'Confirmed'"
                   type="button"
                   style="background: #10662d; color: #fff; border: none; padding: 6px 10px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 12px;"
-                  @click="updateReservationStatus(reservation.id, 'Completed')"
+                  @click="updateReservationStatus(reservation.id, 'completed')"
                 >
                   Complete
                 </button>
                 <button
+                  v-if="reservation.status === 'Confirmed' && reservationHasEnded(reservation)"
                   type="button"
                   style="background: #9b1c1c; color: #fff; border: none; padding: 6px 10px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 12px;"
-                  @click="updateReservationStatus(reservation.id, 'Cancelled')"
+                  @click="updateReservationStatus(reservation.id, 'no_show')"
+                >
+                  Mark No Show
+                </button>
+                <button
+                  v-if="reservation.status === 'No Show'"
+                  type="button"
+                  style="background: #10662d; color: #fff; border: none; padding: 6px 10px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 12px;"
+                  @click="updateReservationStatus(reservation.id, 'completed')"
+                >
+                  Correct to Completed
+                </button>
+                <button
+                  v-if="['Pending', 'Confirmed'].includes(reservation.status)"
+                  type="button"
+                  style="background: #9b1c1c; color: #fff; border: none; padding: 6px 10px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 12px;"
+                  @click="updateReservationStatus(reservation.id, 'cancelled')"
                 >
                   Cancel
                 </button>
@@ -580,50 +710,56 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
-          <div>
-            <h4 style="margin: 0 0 12px; color: #43060a;">Pending Borrowing Requests</h4>
-            <div v-if="requestsList.length === 0" style="padding: 16px; color: #7a5052;">No pending borrowing requests.</div>
-            <div v-else style="display: flex; flex-direction: column; gap: 10px;">
-              <div
-                v-for="req in requestsList"
-                :key="req.id"
-                style="padding: 12px; background: #faf4f4; border-radius: 8px; border: 1px solid #ebdada;"
-              >
-                <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-                  <strong style="color: #59080d;">{{ req.title }}</strong>
-                  <span style="font-size: 12px; background: #fde8e8; color: #9b1c1c; padding: 2px 6px; border-radius: 4px;">{{ requestStatusLabel(req.status) }}</span>
-                </div>
-                <p style="margin: 4px 0; font-size: 12px; color: #693e40;">{{ req.details }}</p>
-                <p style="margin: 4px 0 10px; font-size: 12px; color: #967f7f;">Requested by: {{ req.profiles?.full_name || 'Student' }}</p>
-                <label style="display: block; margin: 8px 0; font-size: 12px; color: #693e40;">
-                  Student instruction or response
-                  <textarea
-                    v-model="requestInstructions[req.id]"
-                    rows="2"
-                    maxlength="2000"
-                    style="display: block; width: 100%; margin-top: 4px; padding: 7px; border: 1px solid #d5c4c4; border-radius: 5px;"
-                  />
-                </label>
-                <button
-                  type="button"
-                  style="margin: 0 0 8px; background: #59080d; color: #fff; border: none; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 12px;"
-                  @click="sendRequestInstruction(req)"
-                >
-                  Send Student Update
-                </button>
-                <button
-                  v-if="['pending', 'processing'].includes(req.status)"
-                  type="button"
-                  style="background: #59080d; color: #fff; border: none; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 12px;"
-                  @click="selectedBorrowRequest = req; showLoanModal = true;"
-                >
-                  Review & Issue Loan
-                </button>
+        <div style="margin-bottom: 24px;">
+          <h4 style="margin: 0 0 12px; color: #43060a;">Book Borrowing Requests</h4>
+          <div v-if="bookBorrowRequests.length === 0" style="padding: 16px; color: #7a5052;">No pending borrowing requests.</div>
+          <div v-else style="display: flex; flex-direction: column; gap: 10px;">
+            <div
+              v-for="req in bookBorrowRequests"
+              :key="req.id"
+              style="padding: 12px; background: #faf4f4; border-radius: 8px; border: 1px solid #ebdada;"
+            >
+              <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                <strong style="color: #59080d;">{{ req.title }}</strong>
+                <span style="font-size: 12px; background: #fde8e8; color: #9b1c1c; padding: 2px 6px; border-radius: 4px;">{{ requestStatusLabel(req.status) }}</span>
               </div>
+              <p style="margin: 4px 0; font-size: 12px; color: #693e40;">{{ req.details }}</p>
+              <p style="margin: 4px 0 10px; font-size: 12px; color: #967f7f;">Requested by: {{ req.profiles?.full_name || 'Student' }}</p>
+              <label style="display: block; margin: 8px 0; font-size: 12px; color: #693e40;">
+                Student instruction or response
+                <textarea
+                  v-model="requestInstructions[req.id]"
+                  rows="2"
+                  maxlength="2000"
+                  style="display: block; width: 100%; margin-top: 4px; padding: 7px; border: 1px solid #d5c4c4; border-radius: 5px;"
+                />
+              </label>
+              <button
+                type="button"
+                style="margin: 0 8px 8px 0; background: #59080d; color: #fff; border: none; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 12px;"
+                @click="sendRequestInstruction(req)"
+              >
+                Send Student Update
+              </button>
+              <button
+                type="button"
+                style="margin: 0 8px 8px 0; background: #10662d; color: #fff; border: none; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 12px;"
+                @click="openLoanIssue(req)"
+              >
+                Confirm & Issue Loan
+              </button>
+              <button
+                type="button"
+                style="margin: 0 0 8px; background: #9b1c1c; color: #fff; border: none; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 12px;"
+                @click="openStaffConfirmation('reject-borrow', req)"
+              >
+                Reject Request
+              </button>
             </div>
           </div>
+        </div>
 
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
           <div>
             <h4 style="margin: 0 0 12px; color: #43060a;">Active Book Loans ({{ bookLoans.length }})</h4>
             <div v-if="bookLoans.length === 0" style="padding: 16px; color: #7a5052;">No active book loans.</div>
@@ -637,16 +773,46 @@ onUnmounted(() => {
                   <strong style="color: #43060a; display: block;">{{ loan.library_books?.title || 'Book' }}</strong>
                   <span style="font-size: 12px; color: #693e40;">{{ loan.profiles?.full_name || 'Student' }}</span>
                   <br />
-                  <span style="font-size: 12px; color: #693e40;">Due: {{ new Date(loan.due_at).toLocaleDateString() }}</span>
+                  <span style="font-size: 12px; color: #693e40;">Status: {{ loanStatusLabel(loan.status) }} · Due: {{ formatLoanDate(loan.due_at) }}</span>
                 </div>
-                <button
-                  type="button"
-                  style="background: #10662d; color: #fff; border: none; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 12px;"
-                  @click="recordBookReturn(loan.id)"
-                >
-                  Record Return
-                </button>
               </div>
+            </div>
+            <p style="margin: 10px 0 0; font-size: 12px; color: #967f7f;">Book returns are processed from submitted return requests after Library staff verifies physical receipt.</p>
+          </div>
+
+          <div>
+            <h4 style="margin: 0 0 12px; color: #43060a;">Submitted Book Return Requests</h4>
+            <div v-if="bookReturnRequests.length === 0" style="padding: 16px; color: #7a5052;">No pending book return requests.</div>
+            <div v-else style="display: flex; flex-direction: column; gap: 10px;">
+              <article
+                v-for="request in bookReturnRequests"
+                :key="request.id"
+                style="padding: 12px; background: #faf4f4; border-radius: 8px; border: 1px solid #ebdada;"
+              >
+                <strong style="color: #59080d;">{{ request.loan?.library_books?.title || request.title }}</strong>
+                <p style="margin: 4px 0; font-size: 12px; color: #693e40;">
+                  {{ request.profiles?.full_name || 'Student' }} · Loan status: {{ loanStatusLabel(request.loan?.status) }}
+                </p>
+                <p style="margin: 4px 0; font-size: 12px; color: #693e40;">Due: {{ formatLoanDate(request.loan?.due_at) }}</p>
+                <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;">
+                  <button
+                    v-if="canProcessReturn(request)"
+                    type="button"
+                    style="background: #10662d; color: #fff; border: none; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 12px;"
+                    @click="openStaffConfirmation('confirm-return', request, request.loan?.library_books?.title)"
+                  >
+                    {{ String(request.loan?.status || '').trim().toLowerCase() === 'returned' ? 'Finalize Return' : 'Confirm Physical Return' }}
+                  </button>
+                  <button
+                    v-if="request.status === 'pending'"
+                    type="button"
+                    style="background: #9b1c1c; color: #fff; border: none; padding: 6px 12px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 12px;"
+                    @click="openStaffConfirmation('reject-return', request, request.loan?.library_books?.title)"
+                  >
+                    Reject Request
+                  </button>
+                </div>
+              </article>
             </div>
           </div>
         </div>
@@ -788,7 +954,7 @@ onUnmounted(() => {
     <div
       v-if="showLoanModal"
       style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 100;"
-      @click.self="showLoanModal = false"
+      @click.self="closeLoanIssue"
     >
       <div style="background: #fff; border-radius: 12px; padding: 24px; max-width: 450px; width: 100%;">
         <h3 style="margin-top: 0; color: #59080d;">Issue Book Loan</h3>
@@ -800,6 +966,7 @@ onUnmounted(() => {
             id="loan-due"
             v-model="loanDueDate"
             type="date"
+            :disabled="issuingLoan"
             style="width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #ccc;"
           />
         </div>
@@ -807,20 +974,33 @@ onUnmounted(() => {
         <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px;">
           <button
             type="button"
+            :disabled="issuingLoan"
             style="background: #ccc; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer;"
-            @click="showLoanModal = false"
+            @click="closeLoanIssue"
           >
             Cancel
           </button>
           <button
             type="button"
+            :disabled="issuingLoan"
             style="background: #59080d; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; font-weight: bold; cursor: pointer;"
             @click="confirmIssueLoan"
           >
-            Confirm & Issue Loan
+            {{ issuingLoan ? 'Issuing…' : 'Confirm & Issue Loan' }}
           </button>
         </div>
       </div>
     </div>
+
+    <ConfirmDialog
+      :model-value="Boolean(staffConfirmation)"
+      :title="staffConfirmationTitle"
+      :message="staffConfirmationMessage"
+      :confirm-text="staffConfirmation?.type === 'confirm-return' ? 'Confirm Receipt' : 'Confirm'"
+      :busy="staffConfirmationBusy"
+      :busy-text="staffConfirmation?.type === 'confirm-return' ? 'Processing return…' : 'Processing…'"
+      @update:model-value="cancelStaffConfirmation"
+      @confirm="confirmStaffAction"
+    />
   </div>
 </template>

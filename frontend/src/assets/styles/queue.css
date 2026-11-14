@@ -147,17 +147,8 @@
 .queue-primary-button {
   min-height: 38px;
   padding: 0 17px;
-  border: 1px solid #59080d;
   border-radius: 9px;
-  background: #59080d;
-  color: white;
-  cursor: pointer;
   font-weight: 700;
-}
-
-.queue-primary-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .queue-ticket {
