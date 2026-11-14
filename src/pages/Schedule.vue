@@ -2,21 +2,17 @@
 <template>
   <section class="schedule-page">
 
-    <!-- PAGE HEADING -->
     <div class="page-heading">
       <h1>Schedule Management</h1>
       <p>Manage office hours, availability, slots and blocked dates</p>
     </div>
 
-    <!-- ERROR MESSAGE -->
     <p v-if="errorMessage" class="error-message">
       {{ errorMessage }}
     </p>
 
-    <!-- MAIN SCHEDULE LAYOUT -->
     <div class="schedule-layout">
 
-      <!-- OFFICE HOURS -->
       <section class="schedule-card office-hours-card">
 
         <div class="schedule-card-header">
@@ -39,14 +35,12 @@
 
       </section>
 
-      <!-- BLOCK A DATE OR TIME -->
       <section class="schedule-card block-date-card">
 
         <h2>Block a date or time</h2>
 
         <form @submit.prevent="blockDate">
 
-          <!-- DATE -->
           <div class="schedule-form-field">
             <input
               v-model="selectedDate"
@@ -58,7 +52,6 @@
             />
           </div>
 
-          <!-- TIME -->
           <div class="schedule-form-field">
             <select
               v-model="selectedTime"
@@ -80,7 +73,6 @@
             </select>
           </div>
 
-          <!-- OPTIONAL REASON -->
           <div class="schedule-form-field">
             <input
               v-model="reason"
@@ -91,7 +83,6 @@
             />
           </div>
 
-          <!-- SUBMIT -->
           <button
             type="submit"
             class="block-button"
@@ -106,7 +97,6 @@
 
     </div>
 
-    <!-- BLOCKED DATES AND TIMES -->
     <section class="schedule-card blocked-section">
 
       <div class="blocked-header">
@@ -120,7 +110,6 @@
             {{ blockedDates.length === 1 ? 'blocked' : 'blocked' }}
           </span>
 
-          <!-- REFRESH BUTTON -->
           <button
             type="button"
             class="refresh-button"
@@ -174,7 +163,6 @@
 
     </section>
 
-    <!-- REMOVE CONFIRMATION MODAL -->
     <div
       v-if="showDeleteConfirm"
       class="schedule-modal-overlay"
@@ -217,7 +205,6 @@
       </div>
     </div>
 
-    <!-- SUCCESS MESSAGE FOR BLOCKING ONLY -->
     <div
       v-if="showSuccess"
       class="schedule-success-overlay"
@@ -249,10 +236,6 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { supabase } from '../lib/Supabase.js'
 import './Schedule.css'
 
-/* =====================================
-   OFFICE HOURS
-===================================== */
-
 const officeHours = ref([
   { day: 'Sunday', hours: 'Closed' },
   { day: 'Monday', hours: '9:00 AM - 5:00 PM' },
@@ -262,10 +245,6 @@ const officeHours = ref([
   { day: 'Friday', hours: '9:00 AM - 5:00 PM' },
   { day: 'Saturday', hours: '9:00 AM - 12:00 PM' }
 ])
-
-/* =====================================
-   DATE AND TIME OPTIONS
-===================================== */
 
 function getLocalDate() {
   const date = new Date()
@@ -322,10 +301,6 @@ const timeOptions = [
   }
 ]
 
-/* =====================================
-   STATES
-===================================== */
-
 const blockedDates = ref([])
 
 const loading = ref(false)
@@ -334,21 +309,15 @@ const deletingId = ref(null)
 
 const errorMessage = ref('')
 
-// SUCCESS MODAL (BLOCKING ONLY)
 const showSuccess = ref(false)
 const successTitle = ref('')
 const successMessage = ref('')
 
-// REMOVE CONFIRMATION MODAL
 const showDeleteConfirm = ref(false)
 const selectedBlockedDate = ref(null)
 
 let officeId = null
 let scheduleChannel = null
-
-/* =====================================
-   HELPER FUNCTIONS
-===================================== */
 
 function formatDate(dateString) {
   if (!dateString) return ''
@@ -388,10 +357,6 @@ function showSuccessMessage(title, message) {
   showSuccess.value = true
 }
 
-/* =====================================
-   GET LOGGED-IN STAFF OFFICE
-===================================== */
-
 async function getStaffOffice() {
   const { data: authData, error: authError } =
     await supabase.auth.getUser()
@@ -423,10 +388,6 @@ async function getStaffOffice() {
 
   officeId = profile.office_id
 }
-
-/* =====================================
-   FETCH BLOCKED DATES AND TIMES
-===================================== */
 
 async function fetchSchedules() {
   if (!officeId) return
@@ -475,17 +436,9 @@ async function fetchSchedules() {
   }
 }
 
-/* =====================================
-   REFRESH SCHEDULES
-===================================== */
-
 async function refreshSchedules() {
   await fetchSchedules()
 }
-
-/* =====================================
-   BLOCK A DATE OR TIME
-===================================== */
 
 async function blockDate() {
   if (!selectedDate.value || !selectedTime.value || !officeId) {
@@ -502,7 +455,6 @@ async function blockDate() {
       ? [null, null]
       : selectedTime.value.split('|')
 
-  // Check for overlapping blocked schedules
   const { data: existing, error: checkError } = await supabase
     .from('office_schedules')
     .select('id, opens_at, closes_at, is_closed')
@@ -516,7 +468,6 @@ async function blockDate() {
 
   const alreadyBlocked = (existing || []).some(item => {
 
-    // All-day blocks conflict with every other block.
     if (
       selectedTime.value === 'all-day' ||
       (!item.opens_at && !item.closes_at)
@@ -524,7 +475,6 @@ async function blockDate() {
       return true
     }
 
-    // Check overlapping time ranges.
     return (
       opensAt < item.closes_at &&
       closesAt > item.opens_at
@@ -567,7 +517,6 @@ async function blockDate() {
 
     await fetchSchedules()
 
-    // Success popup is only for blocking a schedule.
     showSuccessMessage(
       'Schedule Blocked!',
       `${blockedDate} (${blockedTime}) has been successfully blocked.`
@@ -584,11 +533,6 @@ async function blockDate() {
   }
 }
 
-/* =====================================
-   REMOVE BLOCKED DATE OR TIME
-===================================== */
-
-// Open custom confirmation modal
 function deleteBlockedDate(item) {
   if (deletingId.value !== null) return
 
@@ -596,7 +540,6 @@ function deleteBlockedDate(item) {
   showDeleteConfirm.value = true
 }
 
-// Close confirmation modal
 function cancelDelete() {
   if (deletingId.value !== null) return
 
@@ -604,7 +547,6 @@ function cancelDelete() {
   selectedBlockedDate.value = null
 }
 
-// Confirm and delete from Supabase
 async function confirmDeleteBlockedDate() {
   const item = selectedBlockedDate.value
 
@@ -624,11 +566,9 @@ async function confirmDeleteBlockedDate() {
 
     if (error) throw error
 
-    // Close confirmation modal after successful deletion.
     showDeleteConfirm.value = false
     selectedBlockedDate.value = null
 
-    // Refresh the list without showing another popup.
     await fetchSchedules()
 
   } catch (error) {
@@ -641,10 +581,6 @@ async function confirmDeleteBlockedDate() {
     deletingId.value = null
   }
 }
-
-/* =====================================
-   REALTIME UPDATES
-===================================== */
 
 function subscribeToSchedules() {
   if (!officeId) return
@@ -665,10 +601,6 @@ function subscribeToSchedules() {
     )
     .subscribe()
 }
-
-/* =====================================
-   INITIALIZATION
-===================================== */
 
 onMounted(async () => {
   try {
