@@ -122,7 +122,6 @@ async function forgotPassword() {
       <div class="decorative-circle circle-bottom"></div>
     </section>
 
-    <!-- RIGHT PANEL -->
     <section class="login-form-panel">
       <div class="login-content">
 
@@ -138,7 +137,6 @@ async function forgotPassword() {
 
         <form class="login-card" @submit.prevent="signIn">
 
-          <!-- EMAIL -->
           <div class="form-group">
             <label for="email">University Email</label>
 
@@ -152,7 +150,6 @@ async function forgotPassword() {
             />
           </div>
 
-          <!-- PASSWORD -->
           <div class="form-group">
             <label for="password">Password</label>
 
@@ -176,7 +173,6 @@ async function forgotPassword() {
             </div>
           </div>
 
-          <!-- LOGIN OPTIONS -->
           <div class="login-options">
 
             <label class="remember-option">
@@ -198,7 +194,6 @@ async function forgotPassword() {
 
           </div>
 
-          <!-- MESSAGES -->
           <p v-if="errorMessage" class="error-message">
             {{ errorMessage }}
           </p>
@@ -207,7 +202,6 @@ async function forgotPassword() {
             {{ successMessage }}
           </p>
 
-          <!-- SIGN IN BUTTON -->
           <button
             type="submit"
             class="sign-in-button"
@@ -243,8 +237,6 @@ async function forgotPassword() {
   color: #39090c;
   background: #efdfdf;
 }
-
-/* LEFT PANEL */
 
 .login-brand-panel {
   position: relative;
@@ -328,8 +320,6 @@ async function forgotPassword() {
   left: -145px;
 }
 
-/* RIGHT PANEL */
-
 .login-form-panel {
   display: flex;
   align-items: center;
@@ -370,8 +360,6 @@ async function forgotPassword() {
   color: #4c292b;
   font-size: 12px;
 }
-
-/* LOGIN CARD */
 
 .login-card {
   width: 100%;
@@ -433,8 +421,6 @@ async function forgotPassword() {
   cursor: pointer;
 }
 
-/* OPTIONS */
-
 .login-options {
   display: flex;
   align-items: center;
@@ -474,9 +460,7 @@ async function forgotPassword() {
 .password-toggle:hover {
   text-decoration: underline;
 }
-
-/* MESSAGES */
-
+  
 .error-message,
 .success-message {
   margin: 0 0 12px;
@@ -491,8 +475,6 @@ async function forgotPassword() {
 .success-message {
   color: #397a49;
 }
-
-/* BUTTON */
 
 .sign-in-button {
   width: 100%;
@@ -526,8 +508,6 @@ async function forgotPassword() {
   font-size: 10px;
   line-height: 1.6;
 }
-
-/* RESPONSIVE */
 
 @media (max-width: 850px) {
   .login-page {
