@@ -1,8 +1,3 @@
-
-/* =====================================
-   REQUEST PAGE
-===================================== */
-
 .request-page {
     width: 100%;
     min-height: 100%;
@@ -10,8 +5,6 @@
     color: #35080b;
     font-family: Arial, sans-serif;
 }
-
-/* HEADING */
 
 .request-heading {
     margin: 23px 28px 25px;
@@ -33,10 +26,6 @@
     line-height: 1.5;
 }
 
-/* =====================================
-   MAIN WORKSPACE
-===================================== */
-
 .request-workspace {
     display: grid;
     grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.15fr);
@@ -44,10 +33,6 @@
     gap: 20px;
     padding: 0 28px 25px;
 }
-
-/* =====================================
-   LEFT SIDE - STUDENT REQUESTS
-===================================== */
 
 .request-list-section {
     min-width: 0;
@@ -77,8 +62,6 @@
     font-size: 9px;
 }
 
-/* SEARCH */
-
 .request-toolbar {
     display: flex;
     flex-direction: column;
@@ -103,8 +86,6 @@
 .request-search input:focus {
     border-color: #59080e;
 }
-
-/* FILTERS */
 
 .request-filters {
     display: flex;
@@ -135,16 +116,12 @@
     color: #fff;
 }
 
-/* REQUEST LIST */
-
 .request-list {
     display: flex;
     flex-direction: column;
     gap: 9px;
     min-width: 0;
 }
-
-/* REQUEST CARD */
 
 .request-list-card {
     display: flex;
@@ -170,8 +147,6 @@
     border: 2px solid #6486a0;
     background: #f4e8e8;
 }
-
-/* REQUEST CARD MAIN */
 
 .request-card-main {
     display: flex;
@@ -205,8 +180,6 @@
     color: #927879;
     font-size: 9px;
 }
-
-/* REQUEST CARD ACTIONS */
 
 .request-card-actions {
     display: flex;
@@ -259,8 +232,6 @@
     background: #f0d2d2;
 }
 
-/* STATUS BADGES */
-
 .request-status {
     flex-shrink: 0;
     min-width: 55px;
@@ -290,8 +261,6 @@
     color: #943b3b;
 }
 
-/* EMPTY STATE */
-
 .request-empty {
     padding: 30px 12px;
     border: 1px solid #d5c1c2;
@@ -312,10 +281,6 @@
     cursor: pointer;
 }
 
-/* =====================================
-   RIGHT SIDE - REQUEST DETAILS
-===================================== */
-
 .request-right-panel {
     display: flex;
     flex-direction: column;
@@ -330,8 +295,6 @@
     border-radius: 15px;
     background: #f8eeee;
 }
-
-/* DETAILS HEADER */
 
 .details-topline {
     display: flex;
@@ -364,8 +327,6 @@
     cursor: not-allowed;
 }
 
-/* REQUEST TITLE */
-
 .request-details h2 {
     margin: 0 0 15px;
     color: #59080e;
@@ -374,8 +335,6 @@
     font-weight: 700;
     line-height: 1.3;
 }
-
-/* STUDENT INFORMATION */
 
 .request-meta {
     display: grid;
@@ -403,10 +362,6 @@
     overflow-wrap: anywhere;
 }
 
-/* =====================================
-   PENDING REQUEST NOTICE
-===================================== */
-
 .request-pending-notice {
     margin-top: 15px;
     padding: 13px;
@@ -427,10 +382,6 @@
     font-size: 10px;
     line-height: 1.5;
 }
-
-/* =====================================
-   FORM FIELDS
-===================================== */
 
 .request-field {
     display: flex;
@@ -479,10 +430,6 @@
     cursor: not-allowed;
 }
 
-/* =====================================
-   SAVE AND NOTIFY
-===================================== */
-
 .request-save {
     width: 100%;
     min-height: 35px;
@@ -506,10 +453,6 @@
     opacity: 0.6;
     cursor: not-allowed;
 }
-
-/* =====================================
-   STATUS ACTIONS
-===================================== */
 
 .request-status-actions {
     display: flex;
@@ -539,10 +482,6 @@
     cursor: not-allowed;
 }
 
-/* =====================================
-   REQUEST OVERVIEW
-===================================== */
-
 .request-overview {
     min-width: 0;
     padding: 15px;
@@ -558,8 +497,6 @@
     font-size: 17px;
     font-weight: 700;
 }
-
-/* TIMELINE */
 
 .overview-timeline {
     display: flex;
@@ -596,10 +533,6 @@
     font-size: 9px;
 }
 
-/* =====================================
-   NO SELECTION
-===================================== */
-
 .details-placeholder {
     display: flex;
     align-items: center;
@@ -609,10 +542,6 @@
     font-size: 11px;
     text-align: center;
 }
-
-/* =====================================
-   CONFIRMATION AND SUCCESS MODALS
-===================================== */
 
 .request-success-overlay {
     position: fixed;
@@ -724,10 +653,6 @@
     cursor: not-allowed;
 }
 
-/* =====================================
-   ANIMATIONS
-===================================== */
-
 @keyframes requestOverlayFade {
     from {
         opacity: 0;
@@ -749,10 +674,6 @@
         transform: translateY(0) scale(1);
     }
 }
-
-/* =====================================
-   RESPONSIVE
-===================================== */
 
 @media (max-width: 1000px) {
     .request-workspace {
