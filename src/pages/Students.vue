@@ -7,7 +7,6 @@
       <p>Search Office of Student Affairs records by name or student ID.</p>
     </div>
 
-    <!-- SEARCH AND REFRESH -->
     <div class="students-toolbar">
       <input
         v-model="searchQuery"
@@ -31,7 +30,6 @@
       {{ errorMessage }}
     </div>
 
-    <!-- STUDENTS TABLE -->
     <div class="students-table-wrapper">
       <table class="students-table">
         <thead>
@@ -97,7 +95,6 @@
       </span>
     </div>
 
-    <!-- STUDENT DETAILS MODAL -->
     <div
       v-if="selectedStudent"
       class="modal-overlay"
@@ -128,7 +125,6 @@
 
         <div class="section-divider"></div>
 
-        <!-- PERSONAL INFORMATION -->
         <h3>Personal Information</h3>
 
         <div class="personal-grid">
@@ -180,7 +176,6 @@
 
         <div class="section-divider"></div>
 
-        <!-- TRANSACTION LOADING -->
         <p
           v-if="transactionsLoading"
           class="transaction-message"
@@ -195,7 +190,6 @@
           {{ transactionError }}
         </p>
 
-        <!-- CURRENT ACTIVE TRANSACTIONS -->
         <h3>Current Active Transactions</h3>
 
         <div
@@ -244,7 +238,6 @@
           </div>
         </div>
 
-        <!-- TRANSACTION HISTORY -->
         <h3 class="history-heading">Transaction History</h3>
 
         <div
@@ -335,14 +328,12 @@ let studentsChannel = null
 let appointmentsChannel = null
 let requestsChannel = null
 
-// OSA SERVICE IDS
 const OSA_SERVICE_IDS = [
   '5c2ab6fc-5f24-4573-896a-f5a11ad6625e',
   '65a94572-bce2-460f-b3e8-2ed568ee7bbf',
   'e5121b34-a6d2-4370-a023-5153a73c97f8'
 ]
 
-// TERMINAL TRANSACTION STATUSES
 const HISTORY_STATUSES = [
   'completed',
   'cancelled',
@@ -352,7 +343,6 @@ const HISTORY_STATUSES = [
   'declined'
 ]
 
-// CONVERT DATABASE VALUES
 function mapStudent(profile) {
   return {
     id: profile.id,
@@ -366,7 +356,6 @@ function mapStudent(profile) {
   }
 }
 
-// FETCH STUDENTS FROM SUPABASE
 async function fetchStudents() {
   loading.value = true
   errorMessage.value = ''
@@ -415,7 +404,6 @@ async function fetchStudents() {
   }
 }
 
-// SEARCH STUDENTS
 const filteredStudents = computed(() => {
   const query = searchQuery.value.trim().toLowerCase()
 
@@ -432,7 +420,6 @@ const filteredStudents = computed(() => {
   })
 })
 
-// FORMAT STATUS
 function formatStatus(status) {
   const labels = {
     pending: 'Pending',
@@ -453,7 +440,6 @@ function formatStatus(status) {
     String(status || 'Unknown').replaceAll('_', ' ')
 }
 
-// STATUS CLASS
 function getStatusClass(status) {
   const value = String(status || '').toLowerCase()
 
@@ -470,7 +456,6 @@ function getStatusClass(status) {
   return 'status-pending'
 }
 
-// FORMAT DATE
 function formatDate(value) {
   if (!value) return 'Not available'
 
@@ -489,7 +474,6 @@ function formatDate(value) {
   })
 }
 
-// GET SERVICE NAME
 function getServiceName(service) {
   if (!service) return 'OSA Service'
 
@@ -515,7 +499,6 @@ async function openDetails(student) {
   await fetchTransactions(student)
 }
 
-// FETCH APPOINTMENTS AND SERVICE REQUESTS
 async function fetchTransactions(student) {
   if (!student?.id) return
 
@@ -569,7 +552,6 @@ async function fetchTransactions(student) {
     const appointments = appointmentsResult.data || []
     const requests = requestsResult.data || []
 
-    // GET SERVICE INFORMATION
     const serviceIds = [
       ...new Set([
         ...appointments.map(item => item.service_id),
@@ -594,7 +576,6 @@ async function fetchTransactions(student) {
       }
     }
 
-    // CONVERT APPOINTMENTS
     const mappedAppointments = appointments.map(item => ({
       id: `appointment-${item.id}`,
       originalId: item.id,
@@ -607,7 +588,6 @@ async function fetchTransactions(student) {
       details: ''
     }))
 
-    // CONVERT SERVICE REQUESTS
     const mappedRequests = requests.map(item => ({
       id: `request-${item.id}`,
       originalId: item.id,
@@ -623,7 +603,6 @@ async function fetchTransactions(student) {
       details: item.details || ''
     }))
 
-    // COMBINE ALL TRANSACTIONS
     const allTransactions = [
       ...mappedAppointments,
       ...mappedRequests
@@ -631,7 +610,6 @@ async function fetchTransactions(student) {
       return new Date(b.date || 0) - new Date(a.date || 0)
     })
 
-    // SEPARATE ACTIVE AND HISTORY
     activeTransactions.value = allTransactions.filter(item => {
       const status = String(item.status || '').toLowerCase()
       return !HISTORY_STATUSES.includes(status)
@@ -653,7 +631,6 @@ async function fetchTransactions(student) {
   }
 }
 
-// CLOSE STUDENT DETAILS
 function closeDetails() {
   selectedStudent.value = null
 
@@ -664,21 +641,18 @@ function closeDetails() {
   document.body.style.overflow = ''
 }
 
-// ESCAPE KEY
 function handleEscape(event) {
   if (event.key === 'Escape') {
     closeDetails()
   }
 }
 
-// REFRESH OPEN STUDENT TRANSACTIONS
 function refreshSelectedTransactions() {
   if (selectedStudent.value && !transactionsLoading.value) {
     fetchTransactions(selectedStudent.value)
   }
 }
 
-// SUPABASE REALTIME
 function subscribeToStudentChanges() {
   studentsChannel = supabase
     .channel('osa-students-profiles')
@@ -728,7 +702,6 @@ function subscribeToTransactionChanges() {
     .subscribe()
 }
 
-// LIFECYCLE
 onMounted(() => {
   fetchStudents()
 
@@ -770,7 +743,6 @@ onBeforeUnmount(() => {
   font-family: Georgia, "Times New Roman", serif;
 }
 
-/* HEADING */
 .students-heading {
   margin-bottom: 28px;
 }
@@ -790,7 +762,6 @@ onBeforeUnmount(() => {
   line-height: 1.5;
 }
 
-/* TOOLBAR */
 .students-toolbar {
   display: flex;
   gap: 10px;
@@ -840,7 +811,6 @@ onBeforeUnmount(() => {
   cursor: not-allowed;
 }
 
-/* ERROR */
 .error-message {
   margin-bottom: 15px;
   padding: 12px 14px;
@@ -917,7 +887,6 @@ onBeforeUnmount(() => {
   text-align: center;
 }
 
-/* FOOTER */
 .students-footer {
   display: flex;
   justify-content: flex-end;
@@ -927,7 +896,6 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
-/* MODAL BACKDROP */
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -941,7 +909,6 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
 }
 
-/* STUDENT DETAILS PANEL */
 .details-modal {
   position: relative;
   width: 100%;
@@ -1008,7 +975,6 @@ onBeforeUnmount(() => {
   background: #e8d6d7;
 }
 
-/* PERSONAL INFORMATION */
 .personal-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1043,7 +1009,6 @@ onBeforeUnmount(() => {
   color: #a02c2c !important;
 }
 
-/* TRANSACTIONS */
 .transaction-message {
   margin: 8px 0;
   color: #927a7b;
@@ -1176,7 +1141,6 @@ onBeforeUnmount(() => {
   cursor: not-allowed;
 }
 
-/* RESPONSIVE */
 @media (max-width: 600px) {
   .students-page {
     padding: 22px 15px;
