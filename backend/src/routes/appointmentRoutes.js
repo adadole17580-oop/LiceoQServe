@@ -106,7 +106,7 @@ router.post('/reschedule', authenticateUser, async (req, res) => {
     const adminClient = getAdminClient()
     const { data: appointment, error: fetchError } = await adminClient
       .from('appointments')
-      .select('id, student_id, status')
+      .select('id, student_id, status, office_services(name, offices(name))')
       .eq('id', appointmentId)
       .maybeSingle()
 
@@ -116,6 +116,12 @@ router.post('/reschedule', authenticateUser, async (req, res) => {
       return res.status(403).json({ error: 'You can only reschedule your own appointments.' })
     }
     const currentStatus = String(appointment.status).toLowerCase()
+    const officeName = appointment.office_services?.offices?.name
+    if (currentStatus === 'confirmed' && officeName?.trim().toLowerCase() === 'guidance') {
+      return res.status(400).json({
+        error: 'Confirmed Guidance appointments cannot be rescheduled.',
+      })
+    }
     if (!['pending', 'confirmed'].includes(currentStatus)) {
       return res.status(400).json({ error: `Cannot reschedule an appointment that is ${appointment.status}.` })
     }
@@ -129,9 +135,13 @@ router.post('/reschedule', authenticateUser, async (req, res) => {
         updated_at: new Date().toISOString(),
       })
       .eq('id', appointmentId)
+      .eq('status', appointment.status)
       .select('id, scheduled_at, status, purpose, service_id, office_services(name, offices(name))')
       .single()
 
+    if (updateError?.code === 'PGRST116') {
+      return res.status(409).json({ error: 'This appointment changed. Refresh and try again.' })
+    }
     if (updateError) return res.status(500).json({ error: updateError.message })
     return res.json({
       message: 'Your rescheduling request was submitted for office confirmation.',

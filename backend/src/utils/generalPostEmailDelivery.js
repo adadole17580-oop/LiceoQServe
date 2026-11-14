@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import { getAdminClient } from '../supabase.js'
 import { sendStudentNotificationEmail } from './studentNotifications.js'
 import { isGeneralPostNotification } from './generalPostEmailEligibility.js'
@@ -34,15 +33,6 @@ export function startGeneralPostEmailDelivery() {
           }))
       },
     )
-    .on(
-      'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'guidance_blocked_schedules' },
-      ({ new: schedule }) => {
-        void deliverGuidanceBlockedSchedule(adminClient, schedule).catch((error) => {
-          console.error('Could not deliver Guidance schedule-closure emails:', error)
-        })
-      },
-    )
     .subscribe((status, error) => {
       if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
         console.error('General-post email Realtime listener failed:', error?.message || status)
@@ -72,61 +62,6 @@ function queueEmailDelivery(eventKey, deliver) {
     })
   inFlightDeliveries.set(eventKey, delivery)
   return delivery
-}
-
-async function deliverGuidanceBlockedSchedule(adminClient, schedule) {
-  if (!schedule?.id || !schedule.office_id) return
-
-  const { data: office, error: officeError } = await adminClient
-    .from('offices')
-    .select('name, is_active')
-    .eq('id', schedule.office_id)
-    .maybeSingle()
-  if (officeError) throw officeError
-  if (!office?.is_active) return
-
-  const { data: students, error: studentsError } = await adminClient
-    .from('profiles')
-    .select('id')
-    .eq('role', 'student')
-    .eq('is_active', true)
-  if (studentsError) throw studentsError
-
-  const fingerprint = createHash('sha256')
-    .update(JSON.stringify([
-      schedule.office_id,
-      schedule.blocked_date,
-      schedule.start_time,
-      schedule.end_time,
-      schedule.is_all_day,
-      schedule.reason,
-    ]))
-    .digest('hex')
-
-  const message = [
-    `Date: ${schedule.blocked_date}`,
-    schedule.is_all_day
-      ? 'Unavailable all day'
-      : `Unavailable: ${schedule.start_time || 'Start time unavailable'}–${schedule.end_time || 'End time unavailable'}`,
-    schedule.reason || '',
-  ].filter(Boolean).join('\n')
-
-  for (let index = 0; index < (students || []).length; index += 10) {
-    const batch = students.slice(index, index + 10)
-    await Promise.all(batch.map((student) => {
-      const eventKey = `general-post:guidance_blocked_schedules:${schedule.id}:${fingerprint}:${student.id}`
-      return queueEmailDelivery(eventKey, () => sendStudentNotificationEmail({
-        adminClient,
-        recipientId: student.id,
-        title: 'Temporary Office Unavailability',
-        category: 'office_closure',
-        message,
-        eventKey,
-        officeName: office.name,
-        createdAt: schedule.created_at,
-      }))
-    }))
-  }
 }
 
 export async function stopGeneralPostEmailDelivery() {

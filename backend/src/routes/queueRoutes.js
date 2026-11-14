@@ -106,7 +106,7 @@ router.post('/join', authenticateUser, async (req, res) => {
     const officeName = service.offices.name
 
     if (officeName === 'Cashier') {
-      const isTuitionService = /tuition|payment|account|balance/i.test(service.name)
+      const isTuitionService = /tuition|payment|account|balance|cashier queue/i.test(service.name)
       if (!isTuitionService) {
         return res.status(400).json({
           error: 'Cashier office supports tuition payment queueing only.',
@@ -186,7 +186,7 @@ router.post('/join', authenticateUser, async (req, res) => {
 
     const { error: eventError } = await adminClient.from('queue_events').insert({
       queue_id: newTicket.id,
-      event_type: 'joined',
+      event_type: 'created',
     })
     if (eventError) {
       console.error('Queue ticket was created, but its join event could not be recorded:', eventError)

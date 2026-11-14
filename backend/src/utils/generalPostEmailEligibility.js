@@ -2,6 +2,7 @@ const eligibleCategoriesBySource = new Map([
   ['school_events', new Set(['campus_announcement', 'campus_event', 'office_event'])],
   ['office_schedules', new Set(['office_schedule', 'office_closure'])],
   ['guidance_blocked_schedules', new Set(['office_schedule', 'office_closure'])],
+  ['blocked_schedules', new Set(['office_schedule', 'office_closure'])],
 ])
 
 export function isGeneralPostNotification(notification) {

@@ -1,5 +1,3 @@
-const defaultFrontendUrl = 'http://localhost:5173'
-
 function escapeHtml(value) {
   return String(value ?? '')
     .replaceAll('&', '&amp;')
@@ -20,15 +18,18 @@ function formatDate(value) {
 }
 
 function getStudentPortalUrl() {
-  const configuredUrl = process.env.FRONTEND_URL || defaultFrontendUrl
-  let frontendUrl
-  try {
-    frontendUrl = new URL(configuredUrl)
-  } catch {
-    frontendUrl = new URL(defaultFrontendUrl)
+  const configuredUrl = process.env.STUDENT_PORTAL_URL || process.env.FRONTEND_URL?.split(',')[0]?.trim()
+  if (!configuredUrl) {
+    throw new Error('STUDENT_PORTAL_URL or FRONTEND_URL must be configured before generating student notification links.')
   }
-  if (!['http:', 'https:'].includes(frontendUrl.protocol)) frontendUrl = new URL(defaultFrontendUrl)
-  return new URL('/student/home', frontendUrl).toString()
+
+  try {
+    const frontendUrl = new URL(configuredUrl)
+    if (!['http:', 'https:'].includes(frontendUrl.protocol)) throw new Error('Unsupported frontend URL protocol.')
+    return new URL('/student/home', frontendUrl).toString()
+  } catch {
+    throw new Error('STUDENT_PORTAL_URL must be a valid HTTP(S) frontend origin.')
+  }
 }
 
 export function createStudentNotificationEmail({

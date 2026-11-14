@@ -1,5 +1,5 @@
--- Publish the existing Guidance blocked-schedule table so the backend can
--- email students about new temporary office unavailability records.
+-- Publish the existing blocked-schedule table for student notifications,
+-- email delivery, calendar refreshes, and availability checks.
 -- This does not change table data, RLS, grants, or publication filters.
 
 BEGIN;
@@ -10,6 +10,8 @@ DECLARE
   publication_oid oid;
   publication_all_tables boolean;
   publication_inserts boolean;
+  publication_updates boolean;
+  publication_deletes boolean;
   is_published boolean;
   has_row_filter boolean;
   has_column_list boolean;
@@ -54,14 +56,23 @@ BEGIN
       'Preflight failed: RLS is not enabled on public.guidance_blocked_schedules.';
   END IF;
 
-  SELECT oid, puballtables, pubinsert
-  INTO publication_oid, publication_all_tables, publication_inserts
+  SELECT oid, puballtables, pubinsert, pubupdate, pubdelete
+  INTO
+    publication_oid,
+    publication_all_tables,
+    publication_inserts,
+    publication_updates,
+    publication_deletes
   FROM pg_publication
   WHERE pubname = 'supabase_realtime';
 
-  IF publication_oid IS NULL OR NOT publication_inserts THEN
+  IF publication_oid IS NULL
+    OR NOT publication_inserts
+    OR NOT publication_updates
+    OR NOT publication_deletes
+  THEN
     RAISE EXCEPTION
-      'Preflight failed: supabase_realtime is missing or does not publish INSERT events.';
+      'Preflight failed: supabase_realtime must publish INSERT, UPDATE, and DELETE events.';
   END IF;
 
   IF publication_all_tables THEN

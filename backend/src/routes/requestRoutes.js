@@ -10,7 +10,7 @@ router.get('/my', authenticateUser, async (req, res) => {
     const adminClient = getAdminClient()
     const { data: requests, error } = await adminClient
       .from('service_requests')
-      .select('id, request_type, title, details, status, submitted_at, completed_at, updated_at, expected_completion, instructions, instructions_sent_at, service_id, office_services(id, name, office_id, offices(id, name))')
+      .select('id, request_type, title, details, status, submitted_at, completed_at, updated_at, expected_completion, instructions, instructions_sent_at, service_id, book_id, book_loan_id, library_books(id, title, author, isbn), office_services(id, name, office_id, offices(id, name))')
       .eq('student_id', req.user.id)
       .order('submitted_at', { ascending: false })
 
@@ -50,6 +50,12 @@ router.post('/submit', authenticateUser, async (req, res) => {
     }
 
     const officeName = service.offices.name
+
+    if (officeName.trim().toLowerCase() === 'guidance') {
+      return res.status(400).json({
+        error: 'Guidance services accept appointment requests only. Please book a Guidance appointment.',
+      })
+    }
 
     if (officeName === 'Cashier') {
       return res.status(400).json({
@@ -189,6 +195,9 @@ router.post('/update-status', authenticateUser, requireRole(['staff', 'admin']),
     }
     if (!existingRequest) {
       return res.status(404).json({ error: 'Request not found.' })
+    }
+    if (/^Book (Borrow|Return) Request:/i.test(existingRequest.title || '')) {
+      return res.status(400).json({ error: 'Library book requests must be processed through the Library book workflow.' })
     }
     if (req.profile.role !== 'admin' && existingRequest.office_services.office_id !== req.profile.office_id) {
       return res.status(403).json({ error: 'You are not authorized to manage requests for this office.' })

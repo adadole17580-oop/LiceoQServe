@@ -4,6 +4,7 @@ import { getAdminClient } from '../supabase.js'
 import { createStudentNotification } from '../utils/studentNotifications.js'
 
 const router = express.Router()
+const LIBRARY_BORROW_SERVICE_ID = '99a740ad-96d7-43a5-9bcc-3f9723cabd28'
 
 async function requireLibraryOffice(req, res, next) {
   if (req.profile.role === 'admin') return next()
@@ -35,6 +36,7 @@ router.get('/books', async (req, res) => {
       .from('library_books')
       .select('id, title, author, isbn, category, available_copies, total_copies, is_active')
       .eq('is_active', true)
+      .gt('available_copies', 0)
       .order('title', { ascending: true })
 
     if (query) {
@@ -60,6 +62,10 @@ router.get('/books', async (req, res) => {
 
 router.post('/borrow-request', authenticateUser, async (req, res) => {
   const { bookId, remarks } = req.body
+
+  if (req.profile?.role !== 'student') {
+    return res.status(403).json({ error: 'Only students can submit Library book borrowing requests.' })
+  }
 
   if (!bookId) {
     return res.status(400).json({ error: 'Book ID is required.' })
@@ -87,6 +93,7 @@ router.post('/borrow-request', authenticateUser, async (req, res) => {
     const { data: service, error: serviceError } = await adminClient
       .from('office_services')
       .select('id, name, office_id, offices!inner(name)')
+      .eq('id', LIBRARY_BORROW_SERVICE_ID)
       .eq('offices.name', 'Library')
       .eq('offices.is_active', true)
       .eq('is_active', true)
@@ -100,14 +107,40 @@ router.post('/borrow-request', authenticateUser, async (req, res) => {
       return res.status(400).json({ error: 'The Library borrowing service is not configured. Please contact Library staff.' })
     }
 
+    const requestTitle = `Book Borrow Request: ${book.title}`
+    const { data: existingRequest, error: duplicateCheckError } = await adminClient
+      .from('service_requests')
+      .select('id, request_type, title, details, status, submitted_at')
+      .eq('student_id', req.user.id)
+      .eq('service_id', service.id)
+      .eq('title', requestTitle)
+      .in('status', ['pending', 'processing', 'ready_for_pickup', 'Submitted', 'Processing', 'Ready for Pickup'])
+      .order('submitted_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (duplicateCheckError) {
+      console.error('Failed to check for a duplicate Library book request:', duplicateCheckError)
+      return res.status(500).json({ error: 'Could not verify whether this book was already requested. Please try again.' })
+    }
+
+    if (existingRequest) {
+      return res.status(200).json({
+        message: `Your request to borrow "${book.title}" is already awaiting Library staff review.`,
+        request: existingRequest,
+      })
+    }
+
+    const safeRemarks = typeof remarks === 'string' ? remarks.trim() : ''
     const { data: newRequest, error: requestError } = await adminClient
       .from('service_requests')
       .insert({
         student_id: req.user.id,
         service_id: service.id,
+        book_id: book.id,
         request_type: service.name,
-        title: `Book Borrow Request: ${book.title}`,
-        details: `Accession/ISBN: ${book.isbn || book.id}. Author: ${book.author}. Remarks: ${remarks || 'None'}`,
+        title: requestTitle,
+        details: `Accession/ISBN: ${book.isbn || book.id}. Author: ${book.author || 'Not listed'}. Remarks: ${safeRemarks || 'None'}`,
         status: 'pending',
         submitted_at: new Date().toISOString(),
       })
@@ -129,38 +162,34 @@ router.post('/borrow-request', authenticateUser, async (req, res) => {
 })
 
 router.post('/return-request', authenticateUser, async (req, res) => {
-  const query = typeof req.body?.book === 'string' ? req.body.book.trim() : ''
-  if (!query) {
-    return res.status(400).json({ error: 'Enter the borrowed book title or ISBN.' })
+  const { loanId } = req.body || {}
+  if (!loanId) {
+    return res.status(400).json({ error: 'Loan ID is required.' })
   }
 
   try {
     const adminClient = getAdminClient()
-    const { data: loans, error: loanError } = await adminClient
+    const { data: loan, error: loanError } = await adminClient
       .from('book_loans')
-      .select('id, status, library_books(id, title, isbn)')
+      .select('id, book_id, student_id, status, returned_at, library_books(id, title, author, isbn)')
+      .eq('id', loanId)
       .eq('student_id', req.user.id)
-      .eq('status', 'Borrowed')
+      .maybeSingle()
 
     if (loanError) return res.status(500).json({ error: loanError.message })
-
-    const normalizedQuery = query.toLowerCase()
-    const loan = (loans || []).find((item) => (
-      item.library_books?.title?.toLowerCase() === normalizedQuery ||
-      item.library_books?.isbn?.toLowerCase() === normalizedQuery
-    ))
-
     if (!loan) {
-      return res.status(404).json({ error: 'No active borrowed book matches that title or ISBN.' })
+      return res.status(404).json({ error: 'The selected loan was not found for this student.' })
+    }
+    if (String(loan.status || '').trim().toLowerCase() !== 'borrowed' || loan.returned_at) {
+      return res.status(409).json({ error: 'Only an active borrowed book can be returned.' })
     }
 
-    const requestTitle = `Book Return Request: ${loan.library_books.title}`
     const { data: existingRequest, error: duplicateCheckError } = await adminClient
       .from('service_requests')
       .select('id')
       .eq('student_id', req.user.id)
-      .eq('title', requestTitle)
-      .in('status', ['pending', 'processing', 'Submitted', 'Processing'])
+      .eq('book_loan_id', loan.id)
+      .in('status', ['pending', 'processing'])
       .maybeSingle()
 
     if (duplicateCheckError) {
@@ -173,10 +202,10 @@ router.post('/return-request', authenticateUser, async (req, res) => {
     const { data: service, error: serviceError } = await adminClient
       .from('office_services')
       .select('id, name, offices!inner(name, is_active)')
+      .eq('id', LIBRARY_BORROW_SERVICE_ID)
       .eq('offices.name', 'Library')
       .eq('offices.is_active', true)
       .eq('is_active', true)
-      .ilike('name', '%return%')
       .maybeSingle()
 
     if (serviceError) return res.status(500).json({ error: serviceError.message })
@@ -184,21 +213,27 @@ router.post('/return-request', authenticateUser, async (req, res) => {
       return res.status(400).json({ error: 'The Library return-request service is not configured. Please contact Library staff.' })
     }
 
-    const { data: request, error: insertError } = await adminClient
-      .from('service_requests')
-      .insert({
-        student_id: req.user.id,
-        service_id: service.id,
-        request_type: service.name,
-        title: requestTitle,
-        details: `Return request for loan ${loan.id}. Book: ${loan.library_books.title}. ISBN: ${loan.library_books.isbn || 'Not listed'}.`,
-        status: 'pending',
-        submitted_at: new Date().toISOString(),
+    const { data: requestId, error: insertError } = await req.userScopedSupabase
+      .rpc('create_library_return_request', {
+        p_loan_id: loan.id,
+        p_return_service_id: service.id,
       })
-      .select('id, title, status, submitted_at')
-      .single()
 
+    if (insertError?.code === 'P0001') {
+      return res.status(409).json({ error: insertError.message })
+    }
     if (insertError) return res.status(500).json({ error: insertError.message })
+    if (typeof requestId !== 'string' || !requestId) {
+      return res.status(500).json({ error: 'The return-request RPC did not return the submitted request ID.' })
+    }
+
+    const { data: request, error: requestFetchError } = await adminClient
+      .from('service_requests')
+      .select('id, title, status, submitted_at')
+      .eq('id', requestId)
+      .maybeSingle()
+    if (requestFetchError) return res.status(500).json({ error: requestFetchError.message })
+    if (!request) return res.status(500).json({ error: 'The return request was created but could not be retrieved.' })
 
     return res.status(201).json({
       message: `Your return request for "${loan.library_books.title}" has been submitted to the Library.`,
@@ -210,12 +245,115 @@ router.post('/return-request', authenticateUser, async (req, res) => {
   }
 })
 
-router.post('/issue-loan', authenticateUser, requireRole(['staff', 'admin']), requireLibraryOffice, async (req, res) => {
-  const { requestId, bookId, studentId, dueDate } = req.body
+router.get('/staff-return-requests', authenticateUser, requireRole(['staff', 'admin']), requireLibraryOffice, async (_req, res) => {
+  try {
+    const adminClient = getAdminClient()
+    const { data: libraryOffice, error: officeError } = await adminClient
+      .from('offices')
+      .select('id')
+      .eq('name', 'Library')
+      .maybeSingle()
+    if (officeError) return res.status(500).json({ error: officeError.message })
+    if (!libraryOffice) return res.status(404).json({ error: 'The Library office is not configured.' })
 
-  if (!studentId || !dueDate) {
+    const { data: requests, error: requestError } = await adminClient
+      .from('service_requests')
+      .select('id, student_id, book_id, book_loan_id, title, details, status, submitted_at, profiles:profiles!service_requests_student_id_fkey(full_name, student_id), office_services!inner(office_id)')
+      .eq('office_services.office_id', libraryOffice.id)
+      .ilike('title', 'Book Return Request:%')
+      .in('status', ['pending', 'processing'])
+      .order('submitted_at', { ascending: true })
+    if (requestError) return res.status(500).json({ error: requestError.message })
+
+    const loanIds = [...new Set((requests || []).map((request) => request.book_loan_id).filter(Boolean))]
+    let loansById = new Map()
+    if (loanIds.length) {
+      const { data: loans, error: loansError } = await adminClient
+        .from('book_loans')
+        .select('id, book_id, student_id, status, borrowed_at, due_at, returned_at, library_books(title, author, isbn)')
+        .in('id', loanIds)
+      if (loansError) return res.status(500).json({ error: loansError.message })
+      loansById = new Map((loans || []).map((loan) => [loan.id, loan]))
+    }
+
+    return res.json({
+      requests: (requests || []).map((request) => ({
+        ...request,
+        loan: loansById.get(request.book_loan_id) || null,
+      })),
+    })
+  } catch (err) {
+    console.error('Error fetching Library book return requests:', err)
+    return res.status(500).json({ error: 'Internal server error.' })
+  }
+})
+
+router.post('/reject-borrow-request', authenticateUser, requireRole(['staff', 'admin']), requireLibraryOffice, async (req, res) => {
+  const { requestId } = req.body || {}
+  if (!requestId) return res.status(400).json({ error: 'Request ID is required.' })
+
+  try {
+    const adminClient = getAdminClient()
+    const { data: request, error: requestError } = await adminClient
+      .from('service_requests')
+      .select('id, student_id, title, status, updated_at, service_id, office_services!inner(office_id)')
+      .eq('id', requestId)
+      .maybeSingle()
+    if (requestError) return res.status(500).json({ error: requestError.message })
+    if (!request || !String(request.title || '').startsWith('Book Borrow Request:')) {
+      return res.status(404).json({ error: 'Library borrowing request not found.' })
+    }
+
+    const { data: libraryOffice, error: officeError } = await adminClient
+      .from('offices')
+      .select('id')
+      .eq('name', 'Library')
+      .maybeSingle()
+    if (officeError) return res.status(500).json({ error: officeError.message })
+    if (!libraryOffice || request.office_services.office_id !== libraryOffice.id) {
+      return res.status(403).json({ error: 'The borrowing request does not belong to the Library.' })
+    }
+
+    const currentStatus = String(request.status || '').trim().toLowerCase()
+    if (!['pending', 'processing'].includes(currentStatus)) {
+      return res.status(409).json({ error: 'Only a pending borrowing request can be rejected.' })
+    }
+
+    const updatedAt = new Date().toISOString()
+    const { data: updated, error: updateError } = await adminClient
+      .from('service_requests')
+      .update({ status: 'rejected', handled_by: req.user.id, updated_at: updatedAt })
+      .eq('id', request.id)
+      .eq('status', request.status)
+      .select('id, student_id, title, status, updated_at')
+      .maybeSingle()
+    if (updateError) return res.status(500).json({ error: updateError.message })
+    if (!updated) return res.status(409).json({ error: 'This borrowing request changed. Refresh and try again.' })
+
+    await createStudentNotification({
+      adminClient,
+      recipientId: updated.student_id,
+      title: 'Book Request Rejected',
+      category: 'library',
+      message: `Your request to borrow "${updated.title.replace('Book Borrow Request: ', '')}" was rejected by Library staff.`,
+      relatedId: updated.id,
+      eventKey: `book-request:${updated.id}:status:rejected:${updated.updated_at}`,
+      officeName: 'Library',
+      transaction: updated.title,
+    })
+    return res.json({ message: 'The borrowing request was rejected.', request: updated })
+  } catch (err) {
+    console.error('Error rejecting Library book request:', err)
+    return res.status(500).json({ error: 'Internal server error.' })
+  }
+})
+
+router.post('/issue-loan', authenticateUser, requireRole(['staff', 'admin']), requireLibraryOffice, async (req, res) => {
+  const { requestId, studentId, dueDate } = req.body || {}
+
+  if (!requestId || !studentId || !dueDate) {
     return res.status(400).json({
-      error: 'studentId and dueDate are required to issue a loan.',
+      error: 'requestId, studentId, and dueDate are required to issue a loan.',
     })
   }
 
@@ -226,172 +364,89 @@ router.post('/issue-loan', authenticateUser, requireRole(['staff', 'admin']), re
 
   try {
     const adminClient = getAdminClient()
-    let resolvedBookId = bookId
-
-    if (requestId) {
-      const { data: request, error: requestError } = await adminClient
-        .from('service_requests')
-        .select('id, student_id, title, details, status, office_services!inner(office_id)')
-        .eq('id', requestId)
-        .maybeSingle()
-
-      if (requestError) return res.status(500).json({ error: requestError.message })
-      if (!request || request.student_id !== studentId || !request.title.startsWith('Book Borrow Request:')) {
-        return res.status(404).json({ error: 'The matching Library book borrowing request was not found.' })
-      }
-
-      const { data: priorLoan, error: priorLoanError } = await adminClient
-        .from('book_loans')
-        .select('id, book_id, student_id, status, borrowed_at, due_at, returned_at, library_books(title)')
-        .eq('source_request_id', requestId)
-        .maybeSingle()
-
-      if (priorLoanError) return res.status(500).json({ error: priorLoanError.message })
-      if (priorLoan) {
-        const title = priorLoan.library_books?.title || request.title.replace('Book Borrow Request: ', '')
-        await createStudentNotification({
-          adminClient,
-          recipientId: studentId,
-          title: 'Book Issued',
-          category: 'library',
-          message: `"${title}" has been issued to you. Due date: ${new Date(priorLoan.due_at).toLocaleDateString()}.`,
-          relatedId: priorLoan.id,
-          eventKey: `book-loan:${priorLoan.id}:issued`,
-          officeName: 'Library',
-          transaction: `Library book loan: ${title}`,
-        })
-        return res.status(200).json({ message: 'This borrowing request has already been processed.', loan: priorLoan })
-      }
-
-      const requestStatus = String(request.status).trim().toLowerCase()
-      if (!['pending', 'processing', 'submitted'].includes(requestStatus)) {
-        return res.status(409).json({ error: `This borrowing request is already ${request.status}.` })
-      }
-
-      const { data: libraryOffice, error: officeError } = await adminClient
-        .from('offices')
-        .select('id')
-        .eq('name', 'Library')
-        .maybeSingle()
-
-      if (officeError) return res.status(500).json({ error: officeError.message })
-      if (!libraryOffice || request.office_services.office_id !== libraryOffice.id) {
-        return res.status(403).json({ error: 'The borrowing request does not belong to the Library.' })
-      }
-
-      const identifier = request.details?.match(/Accession\/ISBN:\s*(.+?)\.\s*Author:/i)?.[1]?.trim()
-      if (!identifier) {
-        return res.status(400).json({ error: 'The borrowing request does not identify a catalog book.' })
-      }
-
-      const bookQuery = adminClient
-        .from('library_books')
-        .select('id')
-        .eq('is_active', true)
-      const { data: requestedBook, error: requestedBookError } = /^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(identifier)
-        ? await bookQuery.eq('id', identifier).maybeSingle()
-        : await bookQuery.eq('isbn', identifier).maybeSingle()
-
-      if (requestedBookError) return res.status(500).json({ error: requestedBookError.message })
-      if (!requestedBook || (bookId && bookId !== requestedBook.id)) {
-        return res.status(400).json({ error: 'The selected catalog book does not match this borrowing request.' })
-      }
-      resolvedBookId = requestedBook.id
-    }
-
-    if (!resolvedBookId) {
-      return res.status(400).json({ error: 'A valid Library borrowing request or bookId is required.' })
-    }
-
-    const { data: book, error: bookError } = await adminClient
-      .from('library_books')
-      .select('id, title, available_copies')
-      .eq('id', resolvedBookId)
+    const { data: request, error: requestError } = await adminClient
+      .from('service_requests')
+      .select('id, student_id, book_id, title, status, service_id, office_services!inner(office_id)')
+      .eq('id', requestId)
       .maybeSingle()
-
-    if (bookError) return res.status(500).json({ error: bookError.message })
-    if (!book) return res.status(404).json({ error: 'Book not found in the Library catalog.' })
-    if (book.available_copies <= 0) {
-      return res.status(400).json({ error: 'No copies available to issue.' })
+    if (requestError) return res.status(500).json({ error: requestError.message })
+    if (
+      !request ||
+      request.student_id !== studentId ||
+      request.service_id !== LIBRARY_BORROW_SERVICE_ID ||
+      !String(request.title || '').startsWith('Book Borrow Request:')
+    ) {
+      return res.status(404).json({ error: 'The matching Library book borrowing request was not found.' })
+    }
+    if (request.office_services?.office_id !== req.profile.office_id && req.profile.role !== 'admin') {
+      return res.status(403).json({ error: 'The borrowing request does not belong to the Library.' })
     }
 
-    const now = new Date().toISOString()
+    const originalStatus = String(request.status || '').trim().toLowerCase()
+    if (['cancelled', 'rejected'].includes(originalStatus)) {
+      return res.status(409).json({ error: `This borrowing request is already ${originalStatus}.` })
+    }
+    if (!['pending', 'processing', 'confirmed'].includes(originalStatus)) {
+      return res.status(409).json({ error: `This borrowing request is already ${request.status}.` })
+    }
+    if (!request.book_id) {
+      return res.status(400).json({ error: 'The borrowing request does not contain its selected book ID.' })
+    }
+
+    const { data: loanId, error: approvalError } = await req.userScopedSupabase.rpc('approve_library_borrow_request', {
+      p_request_id: requestId,
+      p_due_at: parsedDueDate.toISOString(),
+    })
+    if (approvalError) {
+      console.error('Library book approval RPC failed:', approvalError)
+      return res.status(500).json({ error: approvalError.message })
+    }
+    if (typeof loanId !== 'string' || !loanId) {
+      return res.status(500).json({ error: 'The approval RPC did not return the issued loan ID.' })
+    }
+
+    const loanSelection = 'id, book_id, student_id, source_request_id, status, borrowed_at, due_at, returned_at, library_books(title, author, isbn)'
     const { data: loan, error: loanError } = await adminClient
       .from('book_loans')
-      .insert({
-        student_id: studentId,
-        book_id: resolvedBookId,
-        source_request_id: requestId || null,
-        status: 'Borrowed',
-        borrowed_at: now,
-        due_at: parsedDueDate.toISOString(),
-      })
-      .select()
-      .single()
-
-    if (loanError?.code === '23505' && requestId) {
-      const { data: priorLoan, error: priorLoanError } = await adminClient
-        .from('book_loans')
-        .select('id, book_id, student_id, status, borrowed_at, due_at, returned_at, library_books(title)')
-        .eq('source_request_id', requestId)
-        .maybeSingle()
-
-      if (priorLoanError) return res.status(500).json({ error: priorLoanError.message })
-      if (priorLoan) {
-        const title = priorLoan.library_books?.title || 'Library Book'
-        await createStudentNotification({
-          adminClient,
-          recipientId: studentId,
-          title: 'Book Issued',
-          category: 'library',
-          message: `"${title}" has been issued to you. Due date: ${new Date(priorLoan.due_at).toLocaleDateString()}.`,
-          relatedId: priorLoan.id,
-          eventKey: `book-loan:${priorLoan.id}:issued`,
-          officeName: 'Library',
-          transaction: `Library book loan: ${title}`,
-        })
-        return res.status(200).json({ message: 'This borrowing request has already been processed.', loan: priorLoan })
-      }
+      .select(loanSelection)
+      .eq('id', loanId)
+      .eq('source_request_id', requestId)
+      .maybeSingle()
+    if (loanError) return res.status(500).json({ error: loanError.message })
+    if (!loan || loan.student_id !== studentId || loan.book_id !== request.book_id) {
+      return res.status(500).json({ error: 'The approval RPC returned a loan that does not match the borrowing request.' })
+    }
+    if (String(loan.status || '').trim().toLowerCase() !== 'borrowed') {
+      return res.status(409).json({ error: `The linked loan is already ${loan.status}.` })
     }
 
-    if (loanError) {
-      return res.status(500).json({ error: loanError.message })
+    const { data: confirmedRequest, error: confirmedRequestError } = await adminClient
+      .from('service_requests')
+      .select('status')
+      .eq('id', requestId)
+      .maybeSingle()
+    if (confirmedRequestError) return res.status(500).json({ error: confirmedRequestError.message })
+    if (String(confirmedRequest?.status || '').trim().toLowerCase() !== 'confirmed') {
+      return res.status(500).json({ error: 'The approval RPC did not confirm the borrowing request.' })
     }
 
-    await adminClient
-      .from('library_books')
-      .update({
-        available_copies: book.available_copies - 1,
-        updated_at: now,
-      })
-      .eq('id', resolvedBookId)
-
-    if (requestId) {
-      await adminClient
-        .from('service_requests')
-        .update({
-          status: 'completed',
-          handled_by: req.user.id,
-          completed_at: now,
-        })
-        .eq('id', requestId)
-    }
-
+    const bookTitle = loan.library_books?.title || request.title.replace('Book Borrow Request: ', '')
     await createStudentNotification({
       adminClient,
       recipientId: studentId,
       title: 'Book Issued',
       category: 'library',
-      message: `"${book.title}" has been issued to you. Due date: ${new Date(dueDate).toLocaleDateString()}.`,
+      message: `"${bookTitle}" has been issued to you. Due date: ${new Date(loan.due_at).toLocaleDateString()}.`,
       relatedId: loan.id,
       eventKey: `book-loan:${loan.id}:issued`,
       officeName: 'Library',
-      transaction: `Library book loan: ${book.title}`,
+      transaction: `Library book loan: ${bookTitle}`,
     })
 
-    res.status(201).json({
-      message: `Book loan issued for "${book.title}".`,
+    return res.status(200).json({
+      message: `Book loan confirmed for "${bookTitle}".`,
       loan,
+      requestStatus: 'confirmed',
     })
   } catch (err) {
     console.error('Error issuing book loan:', err)
@@ -400,89 +455,197 @@ router.post('/issue-loan', authenticateUser, requireRole(['staff', 'admin']), re
 })
 
 router.post('/return-book', authenticateUser, requireRole(['staff', 'admin']), requireLibraryOffice, async (req, res) => {
-  const { loanId } = req.body
-
-  if (!loanId) {
-    return res.status(400).json({ error: 'Loan ID is required.' })
-  }
+  const { requestId } = req.body || {}
+  if (!requestId) return res.status(400).json({ error: 'Return request ID is required.' })
 
   try {
     const adminClient = getAdminClient()
-
-    const { data: loan, error: fetchError } = await adminClient
-      .from('book_loans')
-      .select('id, student_id, book_id, status, returned_at, library_books(id, title, available_copies)')
-      .eq('id', loanId)
-      .single()
-
-    if (fetchError || !loan) {
-      return res.status(404).json({ error: 'Loan record not found.' })
+    const { data: request, error: requestError } = await adminClient
+      .from('service_requests')
+      .select('id, student_id, book_id, book_loan_id, title, status, updated_at, service_id, office_services!inner(office_id)')
+      .eq('id', requestId)
+      .maybeSingle()
+    if (requestError) return res.status(500).json({ error: requestError.message })
+    if (!request || !String(request.title || '').startsWith('Book Return Request:') || !request.book_loan_id) {
+      return res.status(404).json({ error: 'The linked Library return request was not found.' })
     }
 
-    if (loan.status === 'Returned') {
-      const bookTitle = loan.library_books?.title || 'Library Book'
+    const { data: libraryOffice, error: officeError } = await adminClient
+      .from('offices')
+      .select('id')
+      .eq('name', 'Library')
+      .maybeSingle()
+    if (officeError) return res.status(500).json({ error: officeError.message })
+    if (!libraryOffice || request.office_services.office_id !== libraryOffice.id) {
+      return res.status(403).json({ error: 'The return request does not belong to the Library.' })
+    }
+
+    if (String(request.status || '').trim().toLowerCase() === 'completed') {
+      return res.json({ message: 'This return request has already been completed.' })
+    }
+    if (!['pending', 'processing'].includes(String(request.status || '').trim().toLowerCase())) {
+      return res.status(409).json({ error: `This return request is already ${request.status}.` })
+    }
+
+    const { data: loan, error: loanError } = await adminClient
+      .from('book_loans')
+      .select('id, student_id, book_id, status, returned_at, library_books(title)')
+      .eq('id', request.book_loan_id)
+      .maybeSingle()
+    if (loanError) return res.status(500).json({ error: loanError.message })
+    if (!loan || loan.student_id !== request.student_id || loan.book_id !== request.book_id) {
+      return res.status(409).json({ error: 'The return request is not linked to the student’s matching loan.' })
+    }
+
+    const loanStatus = String(loan.status || '').trim().toLowerCase()
+    if (!['borrowed', 'returned'].includes(loanStatus)) {
+      return res.status(409).json({ error: `This loan is already ${loan.status} and cannot be returned again.` })
+    }
+
+    const claimTime = new Date().toISOString()
+    const { data: claimedRequest, error: claimError } = await adminClient
+      .from('service_requests')
+      .update({ status: 'processing', handled_by: req.user.id, updated_at: claimTime })
+      .eq('id', request.id)
+      .eq('status', request.status)
+      .eq('updated_at', request.updated_at)
+      .select('id')
+      .maybeSingle()
+    if (claimError) return res.status(500).json({ error: claimError.message })
+    if (!claimedRequest) {
+      const { data: latestRequest, error: latestError } = await adminClient
+        .from('service_requests')
+        .select('status')
+        .eq('id', request.id)
+        .maybeSingle()
+      if (latestError) return res.status(500).json({ error: latestError.message })
+      if (String(latestRequest?.status || '').trim().toLowerCase() === 'completed') {
+        return res.json({ message: 'This return request has already been completed.' })
+      }
+      return res.status(409).json({ error: 'This return request is being handled by another staff member. Refresh and try again.' })
+    }
+
+    const { data: newlyCompleted, error: returnError } = await req.userScopedSupabase.rpc('confirm_library_book_return', {
+      p_return_request_id: request.id,
+    })
+    if (returnError) {
+      const { error: restoreError } = await adminClient
+        .from('service_requests')
+        .update({ status: request.status, updated_at: new Date().toISOString() })
+        .eq('id', request.id)
+        .eq('status', 'processing')
+        .eq('updated_at', claimTime)
+      if (restoreError) console.error('Could not restore a failed Library return request:', restoreError)
+      console.error('Library book return RPC failed:', returnError)
+      return res.status(500).json({ error: returnError.message })
+    }
+    if (typeof newlyCompleted !== 'boolean') {
+      return res.status(500).json({ error: 'The return RPC did not report its completion result.' })
+    }
+
+    const { data: returnedLoan, error: returnedLoanError } = await adminClient
+      .from('book_loans')
+      .select('id, student_id, book_id, status, returned_at, library_books(title)')
+      .eq('id', loan.id)
+      .maybeSingle()
+    if (returnedLoanError) return res.status(500).json({ error: returnedLoanError.message })
+    if (String(returnedLoan?.status || '').trim().toLowerCase() !== 'returned') {
+      return res.status(500).json({ error: 'The Library return operation did not mark the loan as returned.' })
+    }
+
+    const { data: completedRequest, error: completeError } = await adminClient
+      .from('service_requests')
+      .select('status, updated_at')
+      .eq('id', request.id)
+      .maybeSingle()
+    if (completeError) return res.status(500).json({ error: completeError.message })
+    if (String(completedRequest?.status || '').trim().toLowerCase() !== 'completed') {
+      return res.status(500).json({ error: 'The return RPC did not complete the return request.' })
+    }
+
+    if (newlyCompleted) {
+      const bookTitle = returnedLoan.library_books?.title || 'Library Book'
       await createStudentNotification({
         adminClient,
-        recipientId: loan.student_id,
-        title: 'Book Return Recorded',
+        recipientId: request.student_id,
+        title: 'Book Return Confirmed',
         category: 'library',
-        message: `"${bookTitle}" was recorded as returned on ${new Date(loan.returned_at).toLocaleString()}.`,
-        relatedId: loan.id,
-        eventKey: `book-loan:${loan.id}:returned:${loan.returned_at}`,
+        message: `Library staff confirmed receipt of "${bookTitle}". The loan is now returned.`,
+        relatedId: request.id,
+        eventKey: `book-return-request:${request.id}:completed:${completedRequest.updated_at}`,
         officeName: 'Library',
         transaction: `Library book return: ${bookTitle}`,
       })
-      return res.json({ message: `Book "${bookTitle}" was already returned.` })
+
     }
 
-    const now = new Date().toISOString()
-    const { error: updateError } = await adminClient
-      .from('book_loans')
-      .update({
-        status: 'Returned',
-        returned_at: now,
-      })
-      .eq('id', loanId)
+    return res.json({
+      message: `Library staff confirmed receipt of "${returnedLoan.library_books?.title || 'the book'}".`,
+      requestStatus: 'completed',
+      loanStatus: 'returned',
+    })
+  } catch (err) {
+    console.error('Error confirming Library book return:', err)
+    return res.status(500).json({ error: 'Internal server error.' })
+  }
+})
 
-    if (updateError) {
-      return res.status(500).json({ error: updateError.message })
+router.post('/reject-return-request', authenticateUser, requireRole(['staff', 'admin']), requireLibraryOffice, async (req, res) => {
+  const { requestId } = req.body || {}
+  if (!requestId) return res.status(400).json({ error: 'Return request ID is required.' })
+
+  try {
+    const adminClient = getAdminClient()
+    const { data: request, error: requestError } = await adminClient
+      .from('service_requests')
+      .select('id, student_id, title, status, updated_at, office_services!inner(office_id)')
+      .eq('id', requestId)
+      .maybeSingle()
+    if (requestError) return res.status(500).json({ error: requestError.message })
+    if (!request || !String(request.title || '').startsWith('Book Return Request:')) {
+      return res.status(404).json({ error: 'Library return request not found.' })
     }
 
-    const currentCopies = loan.library_books?.available_copies ?? 0
-    await adminClient
-      .from('library_books')
-      .update({
-        available_copies: currentCopies + 1,
-        updated_at: now,
-      })
-      .eq('id', loan.book_id)
+    const { data: libraryOffice, error: officeError } = await adminClient
+      .from('offices')
+      .select('id')
+      .eq('name', 'Library')
+      .maybeSingle()
+    if (officeError) return res.status(500).json({ error: officeError.message })
+    if (!libraryOffice || request.office_services.office_id !== libraryOffice.id) {
+      return res.status(403).json({ error: 'The return request does not belong to the Library.' })
+    }
+    if (String(request.status || '').trim().toLowerCase() !== 'pending') {
+      return res.status(409).json({ error: 'Only a pending return request can be rejected.' })
+    }
+
+    const updatedAt = new Date().toISOString()
+    const { data: updated, error: updateError } = await adminClient
+      .from('service_requests')
+      .update({ status: 'rejected', handled_by: req.user.id, updated_at: updatedAt })
+      .eq('id', request.id)
+      .eq('status', request.status)
+      .eq('updated_at', request.updated_at)
+      .select('id, student_id, title, status, updated_at')
+      .maybeSingle()
+    if (updateError) return res.status(500).json({ error: updateError.message })
+    if (!updated) return res.status(409).json({ error: 'This return request changed. Refresh and try again.' })
 
     await createStudentNotification({
       adminClient,
-      recipientId: loan.student_id,
-      title: 'Book Return Recorded',
+      recipientId: updated.student_id,
+      title: 'Book Return Request Rejected',
       category: 'library',
-      message: `"${loan.library_books?.title || 'Library Book'}" was recorded as returned on ${new Date(now).toLocaleString()}.`,
-      relatedId: loan.id,
-      eventKey: `book-loan:${loan.id}:returned:${now}`,
+      message: `The Library could not confirm the return request for "${updated.title.replace('Book Return Request: ', '')}". The loan remains active until the book is physically received.`,
+      relatedId: updated.id,
+      eventKey: `book-return-request:${updated.id}:rejected:${updated.updated_at}`,
       officeName: 'Library',
-      transaction: `Library book return: ${loan.library_books?.title || 'Library Book'}`,
+      transaction: updated.title,
     })
-
-    await adminClient.from('service_history').insert({
-      student_id: loan.student_id,
-      transaction_id: loan.id,
-      transaction_type: 'Book Loan',
-      title: `Returned: ${loan.library_books?.title || 'Library Book'}`,
-      completed_at: now,
-    })
-
-    res.json({
-      message: `Book "${loan.library_books?.title}" returned successfully.`,
-    })
+    return res.json({ message: 'The return request was rejected. The book loan remains active.' })
   } catch (err) {
-    console.error('Error returning book:', err)
-    res.status(500).json({ error: 'Internal server error.' })
+    console.error('Error rejecting Library book return request:', err)
+    return res.status(500).json({ error: 'Internal server error.' })
   }
 })
 
@@ -490,8 +653,8 @@ router.get('/staff-loans', authenticateUser, requireRole(['staff', 'admin']), re
   try {
     const { data: loans, error } = await getAdminClient()
       .from('book_loans')
-      .select('id, student_id, status, borrowed_at, due_at, returned_at, profiles(full_name, student_id), library_books(title, isbn)')
-      .eq('status', 'Borrowed')
+      .select('id, student_id, book_id, source_request_id, status, borrowed_at, due_at, returned_at, profiles(full_name, student_id), library_books(title, isbn)')
+      .eq('status', 'borrowed')
       .order('due_at', { ascending: true })
 
     if (error) return res.status(500).json({ error: error.message })
@@ -507,7 +670,7 @@ router.get('/my-loans', authenticateUser, async (req, res) => {
     const adminClient = getAdminClient()
     const { data: loans, error } = await adminClient
       .from('book_loans')
-      .select('id, status, borrowed_at, due_at, returned_at, library_books(id, title, author, isbn)')
+      .select('id, book_id, source_request_id, status, borrowed_at, due_at, returned_at, library_books(id, title, author, isbn)')
       .eq('student_id', req.user.id)
       .order('borrowed_at', { ascending: false })
 
