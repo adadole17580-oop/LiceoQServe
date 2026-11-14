@@ -23,10 +23,6 @@ import Schedule from './pages/Schedule.vue'
 import Profile from './pages/Profile.vue'
 import RescheduleAppointment from './pages/RescheduleAppointment.vue'
 
-// =====================================================
-// AUTHENTICATION
-// =====================================================
-
 const isLoggedIn = ref(false)
 const isCheckingSession = ref(true)
 const currentUser = ref(null)
@@ -39,7 +35,6 @@ const appointmentsVersion = ref(0)
 
 const requestFilter = ref('All')
 
-// RESCHEDULE POPUP
 const showRescheduleResult = ref(false)
 const rescheduleResultTitle = ref('')
 const rescheduleResultMessage = ref('')
@@ -50,22 +45,13 @@ let authListener = null
 let appointmentNotificationChannel = null
 let notificationChannelUserId = null
 
-// =====================================================
-// OSA SERVICE IDS
-// =====================================================
-
 const OSA_SERVICE_IDS = [
   '5c2ab6fc-5f24-4573-896a-f5a11ad6625e',
   '65a94572-bce2-460f-b3e8-2ed568ee7bbf',
   'e5121b34-a6d2-4370-a023-5153a73c97f8'
 ]
 
-// Prevent simultaneous duplicate notification creation.
 const notificationsBeingCreated = new Set()
-
-// =====================================================
-// PAGE COMPONENTS
-// =====================================================
 
 const pages = {
   Dashboard,
@@ -85,10 +71,6 @@ const currentPage = computed(() => {
   return pages[activePage.value] || Dashboard
 })
 
-// =====================================================
-// NAVIGATION
-// =====================================================
-
 function navigateToPage(page, filter = 'All') {
   activePage.value = page
 
@@ -99,10 +81,6 @@ function navigateToPage(page, filter = 'All') {
     requestFilter.value = 'All'
   }
 }
-
-// =====================================================
-// RESCHEDULE APPOINTMENT
-// =====================================================
 
 function openReschedule(appointment) {
   if (!appointment?.id) {
@@ -140,7 +118,6 @@ async function saveRescheduledAppointment(updatedAppointment) {
   isSavingReschedule.value = true
 
   try {
-    // Convert Philippine local date and time to ISO timestamp.
     const scheduledDate = new Date(
       `${updatedAppointment.date}T${updatedAppointment.time}:00+08:00`
     )
@@ -151,7 +128,6 @@ async function saveRescheduledAppointment(updatedAppointment) {
 
     const newScheduledAt = scheduledDate.toISOString()
 
-    // Update the actual appointment in Supabase.
     const { data, error } = await supabase
       .from('appointments')
       .update({
@@ -176,12 +152,10 @@ async function saveRescheduledAppointment(updatedAppointment) {
       data
     )
 
-    // Return to Appointments.
     selectedAppointment.value = null
     activePage.value = 'Appointments'
     appointmentsVersion.value++
 
-    // Show custom success popup.
     rescheduleResultType.value = 'success'
     rescheduleResultTitle.value = 'Appointment Rescheduled!'
     rescheduleResultMessage.value =
@@ -220,10 +194,6 @@ function cancelReschedule() {
 
   activePage.value = 'Appointments'
 }
-
-// =====================================================
-// APPOINTMENT NOTIFICATION SYSTEM
-// =====================================================
 
 async function createAppointmentNotification(appointmentId, userId) {
   const lockKey = `${userId}:${appointmentId}`
@@ -334,10 +304,6 @@ async function createAppointmentNotification(appointmentId, userId) {
   }
 }
 
-// =====================================================
-// RECOVER EXISTING PENDING APPOINTMENTS
-// =====================================================
-
 async function syncExistingAppointmentNotifications(userId) {
   try {
     const { data: appointments, error } = await supabase
@@ -371,10 +337,6 @@ async function syncExistingAppointmentNotifications(userId) {
     )
   }
 }
-
-// =====================================================
-// GLOBAL APPOINTMENT REALTIME LISTENER
-// =====================================================
 
 async function removeAppointmentNotificationSubscription() {
   if (appointmentNotificationChannel) {
@@ -449,10 +411,6 @@ async function subscribeToAppointmentNotifications(userId) {
     })
 }
 
-// =====================================================
-// LOGOUT
-// =====================================================
-
 function logout() {
   showLogoutConfirm.value = true
 }
@@ -473,7 +431,6 @@ async function confirmLogout() {
     isLoggedIn.value = false
     currentUser.value = null
 
-    // Clear saved login preference.
     localStorage.removeItem('liceoqserveKeepSignedIn')
     sessionStorage.removeItem('liceoqserveSessionAllowed')
 
@@ -492,27 +449,17 @@ async function confirmLogout() {
   }
 }
 
-// =====================================================
-// LOGIN
-// =====================================================
-
 function handleLogin(user) {
   currentUser.value = user
   isLoggedIn.value = true
   activePage.value = 'Dashboard'
 }
 
-// =====================================================
-// INITIALIZATION AND SESSION RESTORATION
-// =====================================================
 
 onMounted(async () => {
-  // Listen for authentication changes.
   const { data } = supabase.auth.onAuthStateChange(
     (event, session) => {
 
-      // Ignore initial session event.
-      // Session restoration is checked manually below.
       if (event === 'INITIAL_SESSION' || isCheckingSession.value) {
         return
       }
@@ -540,17 +487,14 @@ onMounted(async () => {
   authListener = data.subscription
 
   try {
-    // Get the existing Supabase session.
     const { data: sessionData, error } =
       await supabase.auth.getSession()
 
     if (error) throw error
 
-    // Check the user's Keep me signed in preference.
     const savedSessionPreference =
       localStorage.getItem('liceoqserveKeepSignedIn') === 'true'
 
-    // Session allowed only for the current browser tab.
     const currentTabSession =
       sessionStorage.getItem('liceoqserveSessionAllowed') === 'true'
 
@@ -560,7 +504,6 @@ onMounted(async () => {
     const existingSession = sessionData.session
 
     if (existingSession && !hasPermissionToRestore) {
-      // No saved preference: clear the old session.
       await supabase.auth.signOut()
 
       await removeAppointmentNotificationSubscription()
@@ -569,7 +512,6 @@ onMounted(async () => {
       isLoggedIn.value = false
 
     } else if (existingSession) {
-      // Restore the session.
       currentUser.value = existingSession.user
       isLoggedIn.value = true
 
@@ -582,7 +524,6 @@ onMounted(async () => {
       isLoggedIn.value = false
     }
 
-    // Return to Appointments if requested.
     const requestPage =
       sessionStorage.getItem('returnToAppointments')
 
@@ -606,10 +547,6 @@ onMounted(async () => {
   }
 })
 
-// =====================================================
-// CLEANUP
-// =====================================================
-
 onUnmounted(() => {
   authListener?.unsubscribe()
 
@@ -618,7 +555,6 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <!-- SESSION CHECKING -->
   <div v-if="isCheckingSession" class="loading-screen">
     <div class="loading-content">
       <div class="loading-spinner"></div>
@@ -626,13 +562,11 @@ onUnmounted(() => {
     </div>
   </div>
 
-  <!-- LOGIN PAGE -->
   <LoginView
     v-else-if="!isLoggedIn"
     @login="handleLogin"
   />
 
-  <!-- MAIN APPLICATION -->
   <div v-else class="app-shell">
     <Header />
 
@@ -675,7 +609,6 @@ onUnmounted(() => {
       </main>
     </div>
 
-    <!-- LOGOUT CONFIRMATION -->
     <div
       v-if="showLogoutConfirm"
       class="logout-overlay"
@@ -714,7 +647,6 @@ onUnmounted(() => {
       </section>
     </div>
 
-    <!-- RESCHEDULE RESULT POPUP -->
     <Teleport to="body">
       <div
         v-if="showRescheduleResult"
@@ -787,8 +719,6 @@ body {
   background: #efdfdf;
 }
 
-/* LOADING SCREEN */
-
 .loading-screen {
   display: flex;
   min-height: 100vh;
@@ -825,8 +755,6 @@ body {
     transform: rotate(360deg);
   }
 }
-
-/* LOGOUT POPUP */
 
 .logout-overlay {
   position: fixed;
@@ -917,8 +845,6 @@ body {
 .logout-cancel:hover {
   background: #efdfdf;
 }
-
-/* RESCHEDULE RESULT POPUP */
 
 .reschedule-result-overlay {
   position: fixed;
