@@ -39,7 +39,6 @@ const studentName = computed(() => {
     'Student'
 })
 
-// FORMAT DATE
 function formatDate(date) {
   if (!date) return 'Not set'
 
@@ -68,7 +67,6 @@ function formatDate(date) {
   }).format(parsedDate)
 }
 
-// FORMAT TIME
 function formatTime(time) {
   if (!time) return 'Not set'
 
@@ -93,7 +91,6 @@ function formatTime(time) {
   }).format(parsedDate)
 }
 
-// GET TODAY'S DATE IN PHILIPPINE TIME
 function todayString() {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Manila',
@@ -109,7 +106,6 @@ function todayString() {
   return `${year}-${month}-${day}`
 }
 
-// RESET FORM
 function resetForm() {
   newDate.value = ''
   newTime.value = ''
@@ -118,7 +114,6 @@ function resetForm() {
   pendingSchedule.value = null
 }
 
-// RESET WHEN APPOINTMENT CHANGES
 watch(
   () => props.appointment?.id,
   () => {
@@ -127,7 +122,6 @@ watch(
   { immediate: true }
 )
 
-// REVIEW NEW SCHEDULE
 function reviewSchedule() {
   errorMessage.value = ''
 
@@ -155,14 +149,12 @@ function reviewSchedule() {
   showReview.value = true
 }
 
-// CONFIRM RESCHEDULE
 function confirmSchedule() {
   if (!pendingSchedule.value || props.saving) return
 
   emit('save', pendingSchedule.value)
 }
 
-// RETURN TO FORM
 function cancelReview() {
   if (props.saving) return
 
@@ -171,7 +163,6 @@ function cancelReview() {
   errorMessage.value = ''
 }
 
-// CANCEL EDITING
 function cancelEditing() {
   if (props.saving) return
 
@@ -183,7 +174,6 @@ function cancelEditing() {
 <template>
   <section class="reschedule-page">
 
-    <!-- PAGE HEADING -->
     <header class="page-heading">
       <h1>Reschedule Appointment</h1>
 
@@ -193,10 +183,8 @@ function cancelEditing() {
       </p>
     </header>
 
-    <!-- APPOINTMENT FORM -->
     <div v-if="appointment" class="reschedule-card">
 
-      <!-- CURRENT SCHEDULE -->
       <div class="current-schedule">
         <strong>
           Current:
@@ -206,7 +194,6 @@ function cancelEditing() {
         </strong>
       </div>
 
-      <!-- NEW SCHEDULE FORM -->
       <template v-if="!showReview">
 
         <div class="field-group">
@@ -270,7 +257,6 @@ function cancelEditing() {
         </div>
       </template>
 
-      <!-- REVIEW SCHEDULE -->
       <template v-else>
 
         <h2 class="review-title">
@@ -325,7 +311,6 @@ function cancelEditing() {
       </template>
     </div>
 
-    <!-- NO APPOINTMENT SELECTED -->
     <div v-else class="reschedule-card">
 
       <p class="error-message">
