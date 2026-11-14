@@ -94,9 +94,11 @@
                     v-model="contactNumberDraft"
                     class="contact-edit-input"
                     type="tel"
-                    maxlength="30"
+                    inputmode="numeric"
+                    maxlength="11"
                     autocomplete="tel"
-                    placeholder="Enter your contact number"
+                    placeholder="Enter your 11-digit contact number"
+                    @input="handleContactNumberInput"
                     @keydown.enter.prevent="saveContactNumber"
                   />
                   <div class="contact-actions">
@@ -148,7 +150,6 @@
       </section>
     </template>
 
-    <!-- Shared modal for password form -->
     <AppModal
       v-model="showPasswordModal"
       title="Change Password"
@@ -229,7 +230,6 @@
       </form>
     </AppModal>
 
-    <!-- Shared modal for contact number confirmation -->
     <AppModal
       v-model="showContactConfirmation"
       title="Save Contact Number?"
@@ -244,7 +244,6 @@
       @cancel="cancelContactConfirmation"
     />
 
-    <!-- Shared modal for success and errors -->
     <AppModal
       v-model="feedbackModalOpen"
       :title="feedbackTitle"
@@ -392,8 +391,21 @@ async function loadProfile() {
   }
 }
 
+// Keep only digits and limit the number to 11 characters.
+function handleContactNumberInput(event) {
+  const digitsOnly = event.target.value
+    .replace(/\D/g, '')
+    .slice(0, 11)
+
+  contactNumberDraft.value = digitsOnly
+  event.target.value = digitsOnly
+}
+
 function startContactEdit() {
-  contactNumberDraft.value = profile.value.contact_number || ''
+  contactNumberDraft.value = String(profile.value.contact_number || '')
+    .replace(/\D/g, '')
+    .slice(0, 11)
+
   editingContact.value = true
 }
 
@@ -406,7 +418,11 @@ function cancelContactEdit() {
 function saveContactNumber() {
   if (savingContact.value) return
 
-  const cleanedNumber = contactNumberDraft.value.trim()
+  const cleanedNumber = String(contactNumberDraft.value)
+    .replace(/\D/g, '')
+    .slice(0, 11)
+
+  contactNumberDraft.value = cleanedNumber
 
   if (cleanedNumber === (profile.value.contact_number || '')) {
     editingContact.value = false
@@ -427,7 +443,9 @@ async function confirmSaveContact() {
   savingContact.value = true
 
   try {
-    const cleanedNumber = contactNumberDraft.value.trim()
+    const cleanedNumber = String(contactNumberDraft.value)
+      .replace(/\D/g, '')
+      .slice(0, 11)
 
     const { error } = await supabase.rpc('update_my_contact_number', {
       p_contact_number: cleanedNumber || null,
@@ -519,7 +537,6 @@ async function changePassword() {
       throw new Error('Unable to verify your account email. Please sign in again.')
     }
 
-    // Verify the current password by re-authenticating the user.
     const { error: verifyError } = await supabase.auth.signInWithPassword({
       email: authUser.email,
       password: currentPassword.value,

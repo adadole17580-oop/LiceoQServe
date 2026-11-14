@@ -4,7 +4,9 @@
     <header class="page-heading">
       <div>
         <h1>Queue Management</h1>
-        <p class="subtitle">Automatic next, 30-second arrival timer, and three recall attempts.</p>
+        <p class="subtitle">
+          Automatic next, 30-second arrival timer, and three recall attempts.
+        </p>
       </div>
     </header>
 
@@ -13,17 +15,14 @@
     </div>
 
     <template v-else>
+      <!-- NOW SERVING -->
       <section class="serving-card">
         <p class="serving-label">NOW SERVING</p>
 
-        <h2>{{ servingQueue?.queue_number || '—' }}</h2>
+        <h2>{{ formatQueueNumber(servingQueue?.queue_number) }}</h2>
 
         <p class="serving-name">
           {{ servingQueue?.student_name || 'No student being served' }}
-        </p>
-
-        <p class="serving-service">
-          {{ servingQueue?.service_type || 'Cashier Queue' }}
         </p>
 
         <p class="counter-label">
@@ -100,7 +99,8 @@
 
           <template v-else-if="counterInfo?.is_suspended">
             <p class="suspended-message">
-              Service is currently suspended. The next student will not be called until service resumes.
+              Service is currently suspended. The next student will not be
+              called until service resumes.
             </p>
 
             <button
@@ -118,10 +118,17 @@
         </template>
       </section>
 
+      <!-- QUEUE LIST -->
       <section class="queue-panel">
         <div class="queue-heading">
-          <h2>Queue List</h2>
-          <span>{{ counts.waiting }} Waiting</span>
+          <div>
+            <h2>Queue List</h2>
+            <p>Students currently waiting for their turn</p>
+          </div>
+
+          <span class="waiting-count">
+            {{ counts.waiting }} Waiting
+          </span>
         </div>
 
         <div v-if="waitingQueues.length === 0" class="empty-list">
@@ -134,13 +141,12 @@
           class="queue-item"
         >
           <div class="ticket-number">
-            {{ ticket.queue_number || '—' }}
+            {{ formatQueueNumber(ticket.queue_number) }}
           </div>
 
           <div class="ticket-details">
             <strong>{{ ticket.student_name }}</strong>
-            <p>{{ ticket.service_type }}</p>
-            <small>{{ ticket.student_email || 'No email available' }}</small>
+            <small>Waiting for their turn</small>
           </div>
 
           <span class="ticket-status waiting-status">
@@ -154,12 +160,11 @@
           class="queue-item skipped-item"
         >
           <div class="ticket-number">
-            {{ ticket.queue_number || '—' }}
+            {{ formatQueueNumber(ticket.queue_number) }}
           </div>
 
           <div class="ticket-details">
             <strong>{{ ticket.student_name }}</strong>
-            <p>{{ ticket.service_type }}</p>
 
             <small v-if="ticket.availability_status === 'pending'">
               Awaiting student response
@@ -198,6 +203,7 @@
       </section>
     </template>
 
+    <!-- CONFIRMATION MODAL -->
     <AppModal
       v-model="modalOpen"
       :title="modalTitle"
@@ -216,7 +222,9 @@
         v-if="modalKind === 'confirm' && confirmation?.ticket"
         class="modal-ticket"
       >
-        <strong>{{ confirmation.ticket.queue_number || '—' }}</strong>
+        <strong>
+          {{ formatQueueNumber(confirmation.ticket.queue_number) }}
+        </strong>
         <span>{{ confirmation.ticket.student_name }}</span>
       </div>
     </AppModal>
@@ -256,6 +264,27 @@ let realtimeTimeout = null
 let processingExpiredCalls = false
 let dispatching = false
 let componentMounted = false
+
+// Display-only number formatting.
+// Does not modify queue numbers stored in Supabase.
+function formatQueueNumber(value) {
+  if (value === null || value === undefined || value === '') {
+    return '—'
+  }
+
+  const number = String(value).trim()
+
+  if (/^C-\d+$/i.test(number)) {
+    const numericPart = number.replace(/^C-/i, '')
+    return `C-${numericPart.padStart(3, '0')}`
+  }
+
+  if (/^\d+$/.test(number)) {
+    return `C-${number.padStart(3, '0')}`
+  }
+
+  return number
+}
 
 const confirmationMessages = {
   arrival: {
@@ -494,12 +523,7 @@ async function loadQueue() {
         recalled_at,
         created_at,
         student:profiles!queues_student_id_fkey(
-          full_name,
-          university_email
-        ),
-        service:office_services!queues_service_id_fkey(
-          name,
-          office_id
+          full_name
         )
       `)
       .eq('service_id', CASHIER_SERVICE_ID)
@@ -512,8 +536,6 @@ async function loadQueue() {
     queues.value = (data || []).map((item) => ({
       ...item,
       student_name: item.student?.full_name || 'Student',
-      student_email: item.student?.university_email || '',
-      service_type: item.service?.name || 'Cashier Queue',
     }))
   } catch (error) {
     console.error('Load queue error:', error)
@@ -628,7 +650,7 @@ async function performQueueAction(ticket, action) {
       await loadQueue()
 
       showSuccess(
-        `Student ${ticket.queue_number} has been marked as arrived. The arrival timer has stopped.`
+        `Student ${formatQueueNumber(ticket.queue_number)} has been marked as arrived. The arrival timer has stopped.`
       )
     }
 
@@ -636,7 +658,7 @@ async function performQueueAction(ticket, action) {
       await refreshCounterAndQueue()
 
       showSuccess(
-        `Student ${ticket.queue_number} completed. The next eligible student will be called automatically.`
+        `Student ${formatQueueNumber(ticket.queue_number)} completed. The next eligible student will be called automatically.`
       )
     }
 
@@ -644,7 +666,7 @@ async function performQueueAction(ticket, action) {
       await refreshCounterAndQueue()
 
       showSuccess(
-        `Student ${ticket.queue_number} completed. Counter ${assignedCounterId.value} is now suspended. Resume service when you are ready to call the next student.`
+        `Student ${formatQueueNumber(ticket.queue_number)} completed. Counter ${assignedCounterId.value} is now suspended. Resume service when you are ready to call the next student.`
       )
     }
 
@@ -652,7 +674,7 @@ async function performQueueAction(ticket, action) {
       await loadQueue()
 
       showSuccess(
-        `Recall for student ${ticket.queue_number} was undone successfully.`
+        `Recall for student ${formatQueueNumber(ticket.queue_number)} was undone successfully.`
       )
     }
   } catch (error) {
@@ -725,7 +747,6 @@ function handleRealtimeChange() {
 }
 
 function subscribeToQueue() {
-  // Avoid registering callbacks on an already subscribed channel.
   if (realtimeChannel.value) return
 
   const channel = supabase
@@ -743,7 +764,6 @@ function subscribeToQueue() {
 
   realtimeChannel.value = channel
 
-  // Register all callbacks before subscribing.
   channel.subscribe((status) => {
     if (status === 'CHANNEL_ERROR') {
       console.error('Cashier queue realtime subscription failed.')
@@ -807,7 +827,7 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700;800&display=swap');
 
 * {
   box-sizing: border-box;
@@ -815,95 +835,101 @@ onUnmounted(() => {
 
 .queue-page {
   min-height: 100%;
-  padding: 24px;
+  padding: 30px;
   color: #382629;
   background: #f0e6e6;
   font-family: 'Inter', sans-serif;
 }
 
+/* PAGE HEADING */
+
 .page-heading {
-  margin-bottom: 18px;
+  margin-bottom: 22px;
 }
 
 .page-heading h1 {
-  margin: 0 0 5px;
+  margin: 0 0 6px;
   color: #481522;
   font-family: 'Playfair Display', serif;
-  font-size: 27px;
+  font-size: clamp(26px, 3vw, 34px);
   font-weight: 700;
 }
 
 .subtitle {
   margin: 0;
   color: #89777a;
-  font-size: 11px;
+  font-size: 12px;
 }
+
+/* NOW SERVING CARD */
 
 .serving-card {
   display: flex;
-  min-height: 145px;
+  min-height: 280px;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  margin-bottom: 18px;
-  padding: 18px;
+  margin-bottom: 25px;
+  padding: 30px 20px;
   color: #fff;
   background: #501313;
-  border-radius: 9px;
+  border-radius: 14px;
   text-align: center;
+  box-shadow: 0 5px 16px rgba(65, 17, 20, 0.12);
 }
 
 .serving-label {
-  margin: 0 0 2px;
-  color: #e4cbd1;
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 1.5px;
+  margin: 0 0 5px;
+  color: #d9b9bd;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 3px;
 }
 
 .serving-card h2 {
   margin: 0;
   color: #fff;
   font-family: 'Playfair Display', serif;
-  font-size: clamp(34px, 4vw, 46px);
-  line-height: 1.15;
+  font-size: clamp(58px, 7vw, 82px);
+  font-weight: 700;
+  line-height: 1.12;
+  letter-spacing: 1px;
 }
 
 .serving-name {
-  margin: 5px 0 3px;
+  margin: 10px 0 4px;
   color: #fff;
-  font-size: 12px;
+  font-size: 17px;
   font-weight: 600;
 }
 
-.serving-service {
-  margin: 0;
-  color: #e4cbd1;
-  font-size: 10px;
-}
-
 .counter-label {
-  margin: 8px 0 0;
-  color: #e4cbd1;
-  font-size: 9px;
+  margin: 5px 0 0;
+  color: #d9b9bd;
+  font-size: 11px;
+  font-weight: 500;
   letter-spacing: 1px;
 }
+
+/* ARRIVAL TIMER */
 
 .arrival-timer {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  margin-top: 13px;
+  gap: 4px;
+  margin-top: 18px;
   color: #f0d8a7;
 }
 
 .arrival-timer span {
-  font-size: 9px;
-  letter-spacing: 1px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
 }
 
 .arrival-timer strong {
-  font-size: 25px;
+  font-size: 32px;
+  font-weight: 700;
 }
 
 .arrival-timer.timer-expired {
@@ -913,10 +939,10 @@ onUnmounted(() => {
 .arrival-confirmed {
   display: flex;
   align-items: center;
-  gap: 7px;
-  margin-top: 13px;
+  gap: 8px;
+  margin-top: 18px;
   color: #d4f0d9;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
 }
 
@@ -924,36 +950,40 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 19px;
-  height: 19px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   background: #d4f0d9;
   color: #286647;
-  font-size: 12px;
+  font-size: 14px;
 }
+
+/* SERVING ACTIONS */
 
 .serving-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 9px;
-  margin-top: 13px;
+  gap: 10px;
+  margin-top: 18px;
 }
 
 .serving-button {
-  padding: 8px 13px;
+  padding: 10px 16px;
   color: #fff;
   background: transparent;
   border: 1px solid #a87880;
-  border-radius: 5px;
+  border-radius: 7px;
   font-family: inherit;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
 }
 
 .serving-button:hover:not(:disabled) {
   background: #68252b;
+  transform: translateY(-1px);
 }
 
 .arrival-button {
@@ -987,7 +1017,7 @@ onUnmounted(() => {
 }
 
 .resume-button {
-  margin-top: 13px;
+  margin-top: 16px;
   border-color: #c9a16c;
   background: #c9a16c;
   color: #381c1c;
@@ -1003,9 +1033,9 @@ onUnmounted(() => {
 
 .no-serving-message,
 .suspended-message {
-  margin: 12px 0 0;
+  margin: 15px 0 0;
   color: #e4cbd1;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .suspended-message {
@@ -1019,19 +1049,22 @@ button:disabled {
   opacity: 0.55;
 }
 
+/* QUEUE PANEL */
+
 .queue-panel {
   overflow: hidden;
   background: #f8eeee;
-  border: 1px solid #eadada;
-  border-radius: 8px;
+  border: 1px solid #e5d0d2;
+  border-radius: 12px;
+  box-shadow: 0 4px 14px rgba(65, 17, 20, 0.06);
 }
 
 .queue-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 11px 14px;
+  gap: 15px;
+  padding: 17px 20px;
   background: #dfc5c8;
 }
 
@@ -1039,22 +1072,40 @@ button:disabled {
   margin: 0;
   color: #54232e;
   font-family: 'Playfair Display', serif;
-  font-size: 13px;
+  font-size: 18px;
 }
 
-.queue-heading span {
-  color: #6e4c53;
-  font-size: 9px;
-  font-weight: 600;
+.queue-heading p {
+  margin: 4px 0 0;
+  color: #80666b;
+  font-size: 10px;
 }
+
+.waiting-count {
+  flex-shrink: 0;
+  padding: 7px 12px;
+  color: #6e4c53;
+  background: #f8eeee;
+  border: 1px solid #eadada;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* QUEUE ITEMS */
 
 .queue-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-height: 47px;
-  padding: 8px 13px;
+  gap: 18px;
+  min-height: 76px;
+  padding: 13px 20px;
   border-bottom: 1px solid #eadcdd;
+  transition: background 0.2s ease;
+}
+
+.queue-item:hover {
+  background: #fff8f8;
 }
 
 .queue-item:last-child {
@@ -1062,11 +1113,16 @@ button:disabled {
 }
 
 .ticket-number {
+  display: flex;
   flex-shrink: 0;
-  min-width: 43px;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 105px;
   color: #762036;
-  font-size: 10px;
+  font-family: 'Playfair Display', serif;
+  font-size: 25px;
   font-weight: 700;
+  letter-spacing: 0.5px;
 }
 
 .ticket-details {
@@ -1077,19 +1133,10 @@ button:disabled {
 .ticket-details strong {
   display: block;
   overflow: hidden;
-  margin-bottom: 3px;
+  margin-bottom: 5px;
   color: #443035;
-  font-size: 10px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ticket-details p {
-  overflow: hidden;
-  margin: 0 0 2px;
-  color: #79686c;
-  font-size: 9px;
+  font-size: 13px;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1097,18 +1144,21 @@ button:disabled {
 .ticket-details small {
   display: block;
   overflow: hidden;
-  color: #a09295;
-  font-size: 8px;
+  color: #938084;
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* STATUS BADGES */
+
 .ticket-status {
   flex-shrink: 0;
-  padding: 5px 9px;
+  min-width: 85px;
+  padding: 7px 12px;
   border-radius: 20px;
-  font-size: 8px;
-  font-weight: 600;
+  font-size: 10px;
+  font-weight: 700;
   text-align: center;
 }
 
@@ -1122,6 +1172,10 @@ button:disabled {
   background: #fcf4f1;
 }
 
+.skipped-item:hover {
+  background: #fff0eb;
+}
+
 .skipped-status {
   color: #98575b;
   background: #f2dddd;
@@ -1132,25 +1186,30 @@ button:disabled {
   background: #edf8f0;
 }
 
+/* EMPTY AND LOADING STATES */
+
 .empty-state,
 .empty-list,
 .loading-message {
-  padding: 22px 15px;
+  padding: 28px 18px;
   color: #918084;
-  font-size: 11px;
+  font-size: 12px;
   text-align: center;
 }
 
 .loading-message {
-  padding: 10px;
+  padding: 13px;
+  background: #fbf4f4;
 }
+
+/* MODAL TICKET */
 
 .modal-ticket {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
   margin-top: 16px;
-  padding: 13px;
+  padding: 16px;
   background: #f7eeee;
   border: 1px solid #eadada;
   border-radius: 9px;
@@ -1160,38 +1219,98 @@ button:disabled {
 .modal-ticket strong {
   color: #800000;
   font-family: 'Playfair Display', serif;
-  font-size: 25px;
+  font-size: 32px;
 }
 
 .modal-ticket span {
   color: #594348;
-  font-size: 12px;
+  font-size: 13px;
 }
 
-@media (max-width: 650px) {
-  .queue-page {
-    padding: 18px 12px;
-  }
+/* RESPONSIVE */
 
-  .page-heading h1 {
-    font-size: 24px;
+@media (max-width: 768px) {
+  .queue-page {
+    padding: 22px 16px;
   }
 
   .serving-card {
-    min-height: 135px;
+    min-height: 250px;
+  }
+
+  .serving-card h2 {
+    font-size: clamp(48px, 11vw, 68px);
+  }
+
+  .ticket-number {
+    min-width: 90px;
+    font-size: 21px;
+  }
+
+  .queue-item {
+    gap: 12px;
+    padding: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .queue-page {
+    padding: 18px 10px;
+  }
+
+  .page-heading h1 {
+    font-size: 25px;
+  }
+
+  .serving-card {
+    min-height: 230px;
+    padding: 24px 12px;
+  }
+
+  .serving-card h2 {
+    font-size: 48px;
+  }
+
+  .serving-actions {
+    gap: 7px;
+  }
+
+  .serving-button {
+    padding: 9px 10px;
+    font-size: 10px;
+  }
+
+  .queue-heading {
+    padding: 13px;
+  }
+
+  .queue-heading h2 {
+    font-size: 16px;
   }
 
   .queue-item {
     gap: 8px;
-    padding: 8px;
+    min-height: 68px;
+    padding: 10px;
   }
 
   .ticket-number {
-    min-width: 38px;
+    min-width: 75px;
+    font-size: 18px;
+  }
+
+  .ticket-details strong {
+    font-size: 11px;
+  }
+
+  .ticket-details small {
+    font-size: 9px;
   }
 
   .ticket-status {
-    max-width: 95px;
+    min-width: 70px;
+    padding: 6px 7px;
+    font-size: 9px;
   }
 }
 </style>
