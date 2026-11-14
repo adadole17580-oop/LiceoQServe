@@ -68,14 +68,12 @@ const filteredRequests = computed(() => {
   )
 })
 
-// SELECTED REQUEST
 const selectedRequest = computed(() => {
   return requests.value.find(
     request => request.id === selectedRequestId.value
   ) || null
 })
 
-// STATUS
 function getDisplayStatus(status) {
   const statusMap = {
     pending: 'Pending',
@@ -96,7 +94,6 @@ function getStatusClass(status) {
   return status.toLowerCase().replace(/[^a-z]+/g, '-')
 }
 
-// MAP REQUEST DATA
 function mapRequest(row) {
   const student = row.student || {}
   const service = row.service || {}
@@ -120,7 +117,6 @@ function mapRequest(row) {
   }
 }
 
-// FETCH REQUESTS
 async function fetchRequests() {
   if (!isMounted) return
 
@@ -205,7 +201,6 @@ async function fetchRequests() {
   }
 }
 
-// SELECT REQUEST
 function selectRequest(request) {
   if (saving.value) return
 
@@ -220,7 +215,6 @@ function selectRequest(request) {
   errorMessage.value = ''
 }
 
-// CLOSE DETAILS
 function clearSelectedRequest() {
   if (saving.value) return
 
@@ -229,7 +223,6 @@ function clearSelectedRequest() {
   customInstructions.value = ''
 }
 
-// DATE FORMATTING
 function formatDate(date) {
   if (!date) return 'Not set'
 
@@ -261,7 +254,6 @@ function formatSubmittedDate(date) {
   })
 }
 
-// FILTER
 function selectFilter(filter) {
   selectedFilter.value = filter
 }
@@ -286,7 +278,6 @@ watch(selectedFilter, () => {
   }
 })
 
-// CONFIRMATION POPUP FOR SAVE AND NOTIFY
 function saveAndNotify() {
   if (!selectedRequest.value) {
     errorMessage.value = 'Please select a request first.'
@@ -310,7 +301,6 @@ function cancelConfirmation() {
   showConfirmModal.value = false
 }
 
-// SAVE AND NOTIFY
 async function confirmSaveAndNotify() {
   if (saving.value) return
 
@@ -353,7 +343,6 @@ async function confirmSaveAndNotify() {
       updated_at: new Date().toISOString()
     }
 
-    // SAVE REQUEST DETAILS
     const { data, error } = await supabase
       .from('service_requests')
       .update(updateValues)
@@ -374,12 +363,10 @@ async function confirmSaveAndNotify() {
       throw new Error('The request has no associated student.')
     }
 
-    // DEFAULT MESSAGE WHEN INSTRUCTIONS ARE EMPTY
     const message = instructions
       ? instructions
       : 'Your OSA service request has been updated.'
 
-    // SEND NOTIFICATION
     const { error: notificationError } = await supabase
       .from('notifications')
       .insert({
@@ -398,7 +385,6 @@ async function confirmSaveAndNotify() {
       )
     }
 
-    // UPDATE NOTIFICATION TIMESTAMP
     const { error: timestampError } = await supabase
       .from('service_requests')
       .update({
@@ -432,11 +418,9 @@ async function confirmSaveAndNotify() {
   }
 }
 
-// UPDATE REQUEST STATUS
 async function updateStatus(request, newStatus) {
   if (!request || updatingStatus.value || saving.value) return
 
-  // PENDING: only processing or cancelled
   if (
     request.status === 'pending' &&
     !['processing', 'cancelled'].includes(newStatus)
@@ -444,7 +428,6 @@ async function updateStatus(request, newStatus) {
     return
   }
 
-  // PROCESSING: only completed or cancelled
   if (
     request.status === 'processing' &&
     !['completed', 'cancelled'].includes(newStatus)
@@ -452,7 +435,6 @@ async function updateStatus(request, newStatus) {
     return
   }
 
-  // FINISHED REQUESTS CANNOT BE CHANGED
   if (['completed', 'cancelled'].includes(request.status)) {
     return
   }
@@ -520,7 +502,6 @@ async function updateStatus(request, newStatus) {
   }
 }
 
-// REALTIME SUBSCRIPTION
 function subscribeToRequests() {
   if (requestSubscription) return
 
@@ -550,14 +531,12 @@ function subscribeToRequests() {
     })
 }
 
-// INITIALIZATION
 onMounted(() => {
   isMounted = true
   subscribeToRequests()
   fetchRequests()
 })
 
-// CLEANUP
 onUnmounted(() => {
   isMounted = false
 
@@ -571,7 +550,6 @@ onUnmounted(() => {
 <template>
   <section class="request-page">
 
-    <!-- PAGE HEADING -->
     <header class="request-heading">
       <h1>REQUEST MANAGEMENT</h1>
       <p>
@@ -581,7 +559,6 @@ onUnmounted(() => {
 
     <div class="request-workspace">
 
-      <!-- LEFT SIDE: STUDENT REQUESTS -->
       <section class="request-list-section">
 
         <div class="request-list-header">
@@ -589,7 +566,6 @@ onUnmounted(() => {
           <span>{{ filteredRequests.length }} found</span>
         </div>
 
-        <!-- SEARCH / FILTER -->
         <div class="request-toolbar">
 
           <div class="request-search">
@@ -623,12 +599,10 @@ onUnmounted(() => {
 
         </div>
 
-        <!-- LOADING -->
         <div v-if="loading" class="request-empty">
           Loading student requests...
         </div>
 
-        <!-- ERROR -->
         <div
           v-else-if="errorMessage && requests.length === 0"
           class="request-empty"
@@ -640,7 +614,6 @@ onUnmounted(() => {
           </button>
         </div>
 
-        <!-- REQUEST CARDS -->
         <div v-else class="request-list">
 
           <article
@@ -677,7 +650,6 @@ onUnmounted(() => {
 
             </div>
 
-            <!-- PENDING ACTIONS -->
             <div
               v-if="request.status === 'pending'"
               class="request-card-actions"
@@ -711,7 +683,6 @@ onUnmounted(() => {
 
             </div>
 
-            <!-- PROCESSING / FINISHED ACTIONS -->
             <div
               v-else
               class="request-card-actions"
@@ -727,7 +698,6 @@ onUnmounted(() => {
 
           </article>
 
-          <!-- EMPTY -->
           <div
             v-if="filteredRequests.length === 0"
             class="request-empty"
@@ -738,13 +708,11 @@ onUnmounted(() => {
         </div>
       </section>
 
-      <!-- RIGHT SIDE -->
       <div
         v-if="selectedRequest"
         class="request-right-panel"
       >
 
-        <!-- REQUEST DETAILS CARD -->
         <section class="request-details">
 
           <div class="details-topline">
@@ -786,7 +754,6 @@ onUnmounted(() => {
 
           </div>
 
-          <!-- PENDING NOTICE -->
           <div
             v-if="selectedRequest.status === 'pending'"
             class="request-pending-notice"
@@ -799,10 +766,8 @@ onUnmounted(() => {
             </p>
           </div>
 
-          <!-- PROCESSING: INSTRUCTIONS AND NOTES -->
           <template v-if="selectedRequest.status === 'processing'">
 
-            <!-- EXPECTED COMPLETION -->
             <div class="request-field">
               <label for="expected-completion">
                 Expected completion
@@ -816,7 +781,6 @@ onUnmounted(() => {
               />
             </div>
 
-            <!-- OPTIONAL INSTRUCTIONS -->
             <div class="request-field">
               <label for="custom-instructions">
                 Instruction / Notes
@@ -830,7 +794,6 @@ onUnmounted(() => {
               ></textarea>
             </div>
 
-            <!-- SAVE BUTTON -->
             <button
               type="button"
               class="request-save"
@@ -840,7 +803,6 @@ onUnmounted(() => {
               {{ saving ? 'Saving...' : 'Save and notify student' }}
             </button>
 
-            <!-- PROCESSING STATUS ACTIONS -->
             <div class="request-status-actions">
 
               <button
@@ -863,7 +825,6 @@ onUnmounted(() => {
 
           </template>
 
-          <!-- COMPLETED OR CANCELLED -->
           <div
             v-if="['completed', 'cancelled'].includes(selectedRequest.status)"
             class="request-pending-notice"
@@ -881,7 +842,6 @@ onUnmounted(() => {
 
         </section>
 
-        <!-- REQUEST OVERVIEW CARD -->
         <section class="request-overview">
 
           <h3>Request overview</h3>
@@ -928,7 +888,6 @@ onUnmounted(() => {
 
       </div>
 
-      <!-- NO REQUEST SELECTED -->
       <section
         v-else
         class="request-details details-placeholder"
@@ -938,10 +897,8 @@ onUnmounted(() => {
 
     </div>
 
-    <!-- MODALS -->
     <Teleport to="body">
 
-      <!-- CONFIRMATION MODAL -->
       <div
         v-if="showConfirmModal"
         class="request-success-overlay"
@@ -989,7 +946,6 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- SUCCESS MODAL -->
       <div
         v-if="showSuccessModal"
         class="request-success-overlay"
